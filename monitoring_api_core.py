@@ -335,7 +335,6 @@ def gen_id(prefix=''):
 def detect_stage(crop, planting_date_str):
     """Detect current phenological stage based on planting date."""
     if not planting_date_str or len(planting_date_str) < 8:
-        # No planting date — default to 30 days ago (assume early vegetative)
         planting = datetime.now(timezone.utc) - timedelta(days=30)
     else:
         try:
@@ -345,6 +344,10 @@ def detect_stage(crop, planting_date_str):
                 planting = datetime.strptime(planting_date_str[:10], '%Y-%m-%d').replace(tzinfo=timezone.utc)
             except:
                 planting = datetime.now(timezone.utc) - timedelta(days=30)
+
+    # Ensure timezone-aware for subtraction
+    if planting.tzinfo is None:
+        planting = planting.replace(tzinfo=timezone.utc)
 
     days_since = (datetime.now(timezone.utc) - planting).days
     config = CROP_PHENOLOGY.get(crop)
