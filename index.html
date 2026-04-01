@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#0a1220">
   <title>PIX Monitor - Monitoreo Satelital de Cultivos</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css">
   <style>
     :root {
       --teal:#7FD633;--teal-dark:#5ca825;--blue:#00A4CC;
@@ -232,55 +233,74 @@
   <!-- Main content -->
   <main class="main">
 
-    <!-- DASHBOARD -->
-    <div id="view-dashboard" class="view active" style="padding:20px;overflow-y:auto;height:calc(100vh - 56px)">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">
-        <div>
-          <div style="font-size:20px;font-weight:700">Dashboard de Monitoreo</div>
-          <div style="font-size:13px;color:var(--text-muted)">Vista general de clientes, haciendas y lotes</div>
+    <!-- DASHBOARD — Map full center, panel right -->
+    <div id="view-dashboard" class="view active" style="position:relative;height:calc(100vh - 56px)">
+      <!-- FULL MAP CENTER -->
+      <div id="dashMap" style="position:absolute;top:0;left:0;right:0;bottom:0;z-index:1;background:var(--dark-3)"></div>
+
+      <!-- TOP BAR OVERLAY (KPIs + buttons) -->
+      <div style="position:absolute;top:10px;left:10px;right:380px;z-index:500;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div style="display:flex;gap:6px;background:rgba(10,18,32,0.9);backdrop-filter:blur(8px);padding:6px 10px;border-radius:8px;border:1px solid var(--border)">
+          <span style="color:var(--teal);font-weight:700;font-size:13px" id="statClients">0</span><span style="font-size:11px;color:var(--text-muted)">Clientes</span>
+          <span style="margin:0 4px;color:var(--border)">|</span>
+          <span style="color:var(--teal);font-weight:700;font-size:13px" id="statFields">0</span><span style="font-size:11px;color:var(--text-muted)">Lotes</span>
+          <span style="margin:0 4px;color:var(--border)">|</span>
+          <span style="color:var(--teal);font-weight:700;font-size:13px" id="statArea">0</span><span style="font-size:11px;color:var(--text-muted)">ha</span>
+          <span style="margin:0 4px;color:var(--border)">|</span>
+          <span style="color:var(--danger);font-weight:700;font-size:13px" id="statAlerts">0</span><span style="font-size:11px;color:var(--text-muted)">Alertas</span>
         </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="btn btn-secondary btn-sm" onclick="batchCheckAll()">Verificar Todos</button>
-          <button class="btn btn-primary btn-sm" onclick="showModal('clientModal')">+ Cliente</button>
-          <button class="btn btn-primary btn-sm" onclick="showView('fields')">+ Lote</button>
-          <button class="btn btn-sm" style="background:var(--blue);color:#fff" onclick="openBulkImport()">Importar Lotes</button>
-        </div>
-      </div>
-
-      <!-- KPIs -->
-      <div class="stats-grid" id="dashStats">
-        <div class="stat-card"><div class="stat-value" id="statClients">0</div><div class="stat-label">Clientes</div></div>
-        <div class="stat-card"><div class="stat-value" id="statFields">0</div><div class="stat-label">Lotes activos</div></div>
-        <div class="stat-card"><div class="stat-value" id="statArea">0</div><div class="stat-label">Hectareas</div></div>
-        <div class="stat-card danger"><div class="stat-value" id="statAlerts">0</div><div class="stat-label">Alertas</div></div>
-      </div>
-
-      <!-- Filters -->
-      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
-        <select class="form-input" id="dashFilterClient" onchange="loadDashboard()" style="width:auto;min-width:150px;padding:6px 10px;font-size:12px">
-          <option value="">Todos los clientes</option>
-        </select>
-        <select class="form-input" id="dashFilterCrop" onchange="loadDashboard()" style="width:auto;min-width:120px;padding:6px 10px;font-size:12px">
-          <option value="">Todos los cultivos</option>
-        </select>
-        <select class="form-input" id="dashFilterStatus" onchange="loadDashboard()" style="width:auto;min-width:120px;padding:6px 10px;font-size:12px">
-          <option value="">Todos los estados</option>
-          <option value="active">Activos</option>
-          <option value="paused">Pausados</option>
-          <option value="alert">Con alertas</option>
-        </select>
-      </div>
-
-      <!-- Map -->
-      <div style="border-radius:12px;overflow:hidden;border:1px solid var(--border);margin-bottom:16px;position:relative">
-        <div id="dashMap" style="height:calc(100vh - 300px);min-height:300px;width:100%;background:var(--dark-3)"></div>
-        <div style="position:absolute;top:10px;left:10px;background:rgba(10,18,32,0.85);backdrop-filter:blur(8px);padding:6px 12px;border-radius:8px;font-size:11px;color:var(--text-muted);z-index:500;border:1px solid var(--border)">
-          <span style="color:var(--teal);font-weight:600">Mapa de Lotes</span> — click para detalles
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-primary btn-sm" onclick="showModal('clientModal')" style="font-size:11px;padding:4px 10px">+ Cliente</button>
+          <button class="btn btn-primary btn-sm" onclick="showView('fields')" style="font-size:11px;padding:4px 10px">+ Lote</button>
+          <button class="btn btn-sm" style="background:var(--blue);color:#fff;font-size:11px;padding:4px 10px" onclick="startDrawMode()">Dibujar Lote</button>
         </div>
       </div>
 
-      <!-- Fields grouped by client -->
-      <div id="dashFields"></div>
+      <!-- DRAW MODE OVERLAY -->
+      <div id="drawOverlay" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:600;background:rgba(10,18,32,0.95);backdrop-filter:blur(8px);padding:10px 16px;border-radius:10px;border:2px solid var(--teal);text-align:center">
+        <div style="font-size:13px;font-weight:600;color:var(--teal);margin-bottom:6px">Modo Dibujo</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Click en el mapa para marcar vertices del lote. Doble-click para cerrar.</div>
+        <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+          <select id="drawClient" class="form-input" style="width:auto;min-width:120px;padding:4px 8px;font-size:11px"><option value="">Cliente...</option></select>
+          <input id="drawFieldName" class="form-input" placeholder="Nombre del lote" style="width:140px;padding:4px 8px;font-size:11px">
+          <select id="drawCrop" class="form-input" style="width:auto;padding:4px 8px;font-size:11px">
+            <option value="soja">Soja</option><option value="maiz">Maiz</option><option value="cana">Cana</option>
+            <option value="trigo">Trigo</option><option value="arroz">Arroz</option><option value="girasol">Girasol</option><option value="pastura">Pastura</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="saveDrawnField()" style="font-size:11px;padding:4px 10px">Guardar</button>
+          <button class="btn btn-secondary btn-sm" onclick="cancelDrawMode()" style="font-size:11px;padding:4px 10px">Cancelar</button>
+        </div>
+      </div>
+
+      <!-- RIGHT PANEL (collapsible) -->
+      <div id="dashPanel" style="position:absolute;top:0;right:0;bottom:0;width:360px;z-index:400;background:rgba(10,18,32,0.95);backdrop-filter:blur(8px);border-left:1px solid var(--border);overflow-y:auto;padding:12px;transition:transform 0.3s">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:14px;font-weight:700">Lotes</div>
+          <div style="display:flex;gap:4px">
+            <button class="btn btn-secondary btn-sm" onclick="batchCheckAll()" style="font-size:10px;padding:3px 8px">Verificar Todos</button>
+            <button class="btn btn-sm" onclick="togglePanel()" style="font-size:11px;padding:3px 6px;color:var(--text-muted)">&times;</button>
+          </div>
+        </div>
+        <!-- Filters -->
+        <div style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap">
+          <select class="form-input" id="dashFilterClient" onchange="loadDashboard()" style="width:auto;flex:1;min-width:80px;padding:4px 6px;font-size:11px">
+            <option value="">Clientes</option>
+          </select>
+          <select class="form-input" id="dashFilterCrop" onchange="loadDashboard()" style="width:auto;flex:1;min-width:70px;padding:4px 6px;font-size:11px">
+            <option value="">Cultivos</option>
+          </select>
+          <select class="form-input" id="dashFilterStatus" onchange="loadDashboard()" style="width:auto;flex:1;min-width:70px;padding:4px 6px;font-size:11px">
+            <option value="">Estado</option>
+            <option value="active">Activos</option>
+            <option value="paused">Pausados</option>
+            <option value="alert">Alertas</option>
+          </select>
+        </div>
+        <div id="dashFields"></div>
+      </div>
+
+      <!-- TOGGLE PANEL BUTTON (when collapsed) -->
+      <button id="panelToggleBtn" onclick="togglePanel()" style="display:none;position:absolute;top:10px;right:10px;z-index:500;background:rgba(10,18,32,0.9);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:8px;cursor:pointer;font-size:12px">Lotes &rarr;</button>
     </div>
 
     <!-- CLIENTS -->
@@ -420,6 +440,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 <script>
 // ============================================================
 // PIX Monitor — Frontend Application
@@ -505,6 +526,89 @@ function completeLogin(user) {
 function pixMonitorLogout() {
   sessionStorage.removeItem('pix_monitor_user');
   location.reload();
+}
+
+// ── PANEL TOGGLE ──
+let panelOpen = true;
+function togglePanel() {
+  panelOpen = !panelOpen;
+  const panel = document.getElementById('dashPanel');
+  const btn = document.getElementById('panelToggleBtn');
+  panel.style.transform = panelOpen ? 'translateX(0)' : 'translateX(100%)';
+  btn.style.display = panelOpen ? 'none' : 'block';
+  setTimeout(() => { if (dashMap) dashMap.invalidateSize(); }, 350);
+}
+
+// ── DRAW MODE (Leaflet.Draw) ──
+let drawControl = null;
+let drawnLayer = null;
+let drawMode = false;
+
+function startDrawMode() {
+  drawMode = true;
+  document.getElementById('drawOverlay').style.display = 'block';
+  // Populate client dropdown
+  apiGet('/clients').then(data => {
+    const sel = document.getElementById('drawClient');
+    sel.innerHTML = '<option value="">Sin cliente</option>' + (data.clients||[]).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  });
+  // Init draw control
+  if (!dashMap) initDashMap();
+  if (drawnLayer) dashMap.removeLayer(drawnLayer);
+  drawnLayer = new L.FeatureGroup();
+  dashMap.addLayer(drawnLayer);
+  drawControl = new L.Control.Draw({
+    position: 'topleft',
+    draw: {
+      polygon: { allowIntersection: false, shapeOptions: { color: '#7FD633', weight: 2 } },
+      polyline: false, rectangle: false, circle: false, marker: false, circlemarker: false
+    },
+    edit: { featureGroup: drawnLayer }
+  });
+  dashMap.addControl(drawControl);
+  // Auto-click polygon tool
+  setTimeout(() => {
+    const btn = document.querySelector('.leaflet-draw-draw-polygon');
+    if (btn) btn.click();
+  }, 300);
+  dashMap.on(L.Draw.Event.CREATED, function(e) {
+    drawnLayer.clearLayers();
+    drawnLayer.addLayer(e.layer);
+  });
+}
+
+function cancelDrawMode() {
+  drawMode = false;
+  document.getElementById('drawOverlay').style.display = 'none';
+  if (drawControl) { dashMap.removeControl(drawControl); drawControl = null; }
+  if (drawnLayer) { dashMap.removeLayer(drawnLayer); drawnLayer = null; }
+  dashMap.off(L.Draw.Event.CREATED);
+}
+
+async function saveDrawnField() {
+  if (!drawnLayer || drawnLayer.getLayers().length === 0) { toast('Dibuja el perimetro del lote primero', 'warning'); return; }
+  const name = document.getElementById('drawFieldName').value.trim();
+  if (!name) { toast('Nombre del lote obligatorio', 'warning'); return; }
+  const layer = drawnLayer.getLayers()[0];
+  const geojson = layer.toGeoJSON();
+  const coords = geojson.geometry.coordinates;
+  // Calculate area (approx)
+  const latlngs = layer.getLatLngs()[0];
+  const areaM2 = L.GeometryUtil ? L.GeometryUtil.geodesicArea(latlngs) : 0;
+  const areaHa = Math.round(areaM2 / 10000 * 100) / 100;
+
+  const field = await apiPost('/fields', {
+    name: name,
+    clientId: document.getElementById('drawClient').value,
+    property: '',
+    areaHa: areaHa || 0,
+    crop: document.getElementById('drawCrop').value,
+    plantingDate: '',
+    boundary: geojson.geometry
+  });
+  toast(`Lote "${name}" creado (${areaHa} ha)`);
+  cancelDrawMode();
+  loadDashboard();
 }
 
 // ── VIEWS ──

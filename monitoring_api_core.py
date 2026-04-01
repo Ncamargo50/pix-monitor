@@ -573,29 +573,71 @@ def compute_monitoring(field):
     # Date range
     now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     now = ee.Date(now_str)
-    recent_start = now.advance(-45, 'day')  # 45 days window for tropical cloud cover
-    baseline_start = now.advance(-730, 'day')
-    baseline_end = now.advance(-45, 'day')
 
-    # Cloud masking
+    # Cloud masking — keep only clear pixels
     def mask_clouds_scl(img):
         scl = img.select('SCL')
         mask = scl.eq(4).Or(scl.eq(5)).Or(scl.eq(6)).Or(scl.eq(7))
         return img.updateMask(mask)
 
-    # ── STEP 1: Get recent images (relaxed filter — single query) ──
-    s2_recent = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-        .filterBounds(aoi)
-        .filterDate(recent_start, now)
-        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
-        .map(mask_clouds_scl)
-        .sort('system:time_start', False))
+    # Compute cloud % within field boundary
+    def add_field_cloud_pct(img):
+        scl = img.select('SCL')
+        cloud = scl.eq(3).Or(scl.eq(8)).Or(scl.eq(9)).Or(scl.eq(10)).Or(scl.eq(11))
+        pct = cloud.reduceRegion(reducer=ee.Reducer.mean(), geometry=aoi, scale=20, bestEffort=True).values().get(0)
+        return img.set('cloud_pct_field', ee.Algorithms.If(pct, pct, 1))
 
-    # getInfo #1: count + date of latest image
-    recent_info = s2_recent.aggregate_array('system:time_start').getInfo()
-    recent_count = len(recent_info)
+    # ── STEP 1: INTELLIGENT IMAGE SEARCH ──
+    # Strategy: search in expanding windows until a clean image is found
+    # Primera evaluacion: busca retroactivamente hasta 180 dias
+    # Monitoreo activo: busca ultimos 30 dias, si no hay, informa y espera
+    is_first_check = field.get('monitoring', {}).get('checkCount', 0) == 0
+    search_windows = [30, 60, 90, 120, 180] if is_first_check else [30, 45]
+
+    s2_recent = None
+    recent_count = 0
+    search_days_used = 0
+
+    for window_days in search_windows:
+        search_start = now.advance(-window_days, 'day')
+        candidates = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+            .filterBounds(aoi)
+            .filterDate(search_start, now)
+            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 40))
+            .map(add_field_cloud_pct)
+            .filter(ee.Filter.lte('cloud_pct_field', 0.15))  # <=15% clouds in field
+            .map(mask_clouds_scl)
+            .sort('system:time_start', False))
+
+        count = candidates.size().getInfo()
+        if count > 0:
+            s2_recent = candidates
+            recent_count = count
+            search_days_used = window_days
+            print(f'[GEE] Found {count} clean images in {window_days}-day window ({time.time()-t0:.1f}s)')
+            break
+        print(f'[GEE] No clean images in {window_days}-day window, expanding...')
+
+    if recent_count == 0:
+        # Last resort: take ANY image with <50% clouds, even partially cloudy
+        fallback_start = now.advance(-180, 'day')
+        s2_recent = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+            .filterBounds(aoi)
+            .filterDate(fallback_start, now)
+            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 50))
+            .map(mask_clouds_scl)
+            .sort('system:time_start', False))
+        recent_count = s2_recent.size().getInfo()
+        search_days_used = 180
+        if recent_count > 0:
+            print(f'[GEE] Fallback: {recent_count} partially cloudy images in 180 days ({time.time()-t0:.1f}s)')
+
     cloud_blocked = recent_count == 0
-    print(f'[GEE] {recent_count} images found in last 30 days ({time.time()-t0:.1f}s)')
+    if cloud_blocked:
+        print(f'[GEE] NO images found in 180 days for {field.get("name")} — fully cloud blocked')
+
+    baseline_start = now.advance(-730, 'day')
+    baseline_end = now.advance(-max(search_days_used, 45), 'day')
 
     # ── STEP 2: Compute all indices on latest image ──
     def compute_indices(img):
