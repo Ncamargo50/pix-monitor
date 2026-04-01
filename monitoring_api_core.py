@@ -310,7 +310,7 @@ CROP_PHENOLOGY = {
 
 JSONBLOB_ID = os.environ.get('JSONBLOB_ID', '')
 JSONBLOB_URL = f'https://jsonblob.com/api/jsonBlob/{JSONBLOB_ID}' if JSONBLOB_ID else ''
-_DB_EMPTY = {"clients": [], "fields": [], "alerts": [], "timeseries": {}, "version": 0}
+import threading
 
 def _cloud_load():
     """Load DB from JSONBlob (cloud persistence)."""
@@ -340,20 +340,25 @@ def _cloud_save(db):
     except Exception as e:
         print(f'[DB] Cloud save error: {e}')
 
+def _new_empty_db():
+    return {"clients": [], "fields": [], "alerts": [], "timeseries": {}, "version": 0}
+
 def load_db():
     # Try local file first
     if os.path.exists(DB_FILE):
         with open(DB_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+            data.setdefault('timeseries', {})
+            return data
     # Fallback to cloud
     cloud_data = _cloud_load()
     if cloud_data:
-        # Cache locally
+        cloud_data.setdefault('timeseries', {})
         with open(DB_FILE, 'w', encoding='utf-8') as f:
             json.dump(cloud_data, f, indent=2, ensure_ascii=False)
         print(f'[DB] Loaded from cloud: {len(cloud_data.get("clients",[]))} clients, {len(cloud_data.get("fields",[]))} fields')
         return cloud_data
-    return dict(_DB_EMPTY)
+    return _new_empty_db()
 
 def save_db(db):
     db['version'] = db.get('version', 0) + 1
@@ -361,8 +366,10 @@ def save_db(db):
     # Save locally
     with open(DB_FILE, 'w', encoding='utf-8') as f:
         json.dump(db, f, indent=2, ensure_ascii=False)
-    # Save to cloud (async-safe, non-blocking on error)
-    _cloud_save(db)
+    # Save to cloud in background thread (non-blocking)
+    import copy
+    db_copy = copy.deepcopy(db)
+    threading.Thread(target=_cloud_save, args=(db_copy,), daemon=True).start()
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -664,8 +671,11 @@ def compute_monitoring(field):
             print(f'[GEE] Indices computed: {len(current_values)} values ({time.time()-t0:.1f}s)')
         except Exception as e:
             print(f'[GEE] Index error: {e}')
+            traceback.print_exc()
             for idx in indices_needed:
                 current_values[idx] = None
+            # Treat as cloud blocked to avoid saving None values
+            cloud_blocked = True
 
         # getInfo #3: Weed detection stats (only if in weed window)
         weed_indices_for_stage = stage_cfg.get('weed_indices', [])

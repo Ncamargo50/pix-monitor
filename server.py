@@ -72,7 +72,12 @@ class UnifiedHandler(BaseHTTPRequestHandler):
 
     def _body(self):
         length = int(self.headers.get('Content-Length', 0))
-        return json.loads(self.rfile.read(length).decode('utf-8')) if length > 0 else {}
+        if length <= 0:
+            return {}
+        try:
+            return json.loads(self.rfile.read(length).decode('utf-8'))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return {}
 
     def _serve_static(self, path):
         """Serve static files from pix-monitor directory."""
@@ -213,6 +218,10 @@ class UnifiedHandler(BaseHTTPRequestHandler):
                 traceback.print_exc()
                 self._error(str(e), 500); return
 
+            # Bug 3 fix: check for GEE errors before saving
+            if 'error' in result:
+                self._error(result['error'], 500); return
+
             field['monitoring']['lastCheck'] = now_iso()
             field['monitoring']['currentStage'] = result.get('stage')
             field['monitoring']['checkCount'] = field['monitoring'].get('checkCount', 0) + 1
@@ -225,8 +234,12 @@ class UnifiedHandler(BaseHTTPRequestHandler):
                 for a in result['anomalies']:
                     db['alerts'].append(a)
 
+            # Bug 8 fix: ensure timeseries key exists
+            if 'timeseries' not in db:
+                db['timeseries'] = {}
             ts_key = field['id']
-            if ts_key not in db.get('timeseries', {}): db['timeseries'][ts_key] = []
+            if ts_key not in db['timeseries']:
+                db['timeseries'][ts_key] = []
             db['timeseries'][ts_key].append({
                 'date': now_iso(), 'stage': result.get('stage'),
                 'values': result.get('currentValues', {}),
