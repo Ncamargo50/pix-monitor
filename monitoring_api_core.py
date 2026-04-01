@@ -573,9 +573,9 @@ def compute_monitoring(field):
     # Date range
     now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     now = ee.Date(now_str)
-    recent_start = now.advance(-30, 'day')
+    recent_start = now.advance(-45, 'day')  # 45 days window for tropical cloud cover
     baseline_start = now.advance(-730, 'day')
-    baseline_end = now.advance(-30, 'day')
+    baseline_end = now.advance(-45, 'day')
 
     # Cloud masking
     def mask_clouds_scl(img):
@@ -587,7 +587,7 @@ def compute_monitoring(field):
     s2_recent = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
         .filterBounds(aoi)
         .filterDate(recent_start, now)
-        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
         .map(mask_clouds_scl)
         .sort('system:time_start', False))
 
