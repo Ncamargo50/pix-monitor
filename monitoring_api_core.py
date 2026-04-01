@@ -305,20 +305,64 @@ CROP_PHENOLOGY = {
 }
 
 # ============================================================
-# DATABASE HELPERS
+# DATABASE HELPERS — Local file + JSONBlob cloud sync
 # ============================================================
 
+JSONBLOB_ID = os.environ.get('JSONBLOB_ID', '')
+JSONBLOB_URL = f'https://jsonblob.com/api/jsonBlob/{JSONBLOB_ID}' if JSONBLOB_ID else ''
+_DB_EMPTY = {"clients": [], "fields": [], "alerts": [], "timeseries": {}, "version": 0}
+
+def _cloud_load():
+    """Load DB from JSONBlob (cloud persistence)."""
+    if not JSONBLOB_URL:
+        return None
+    try:
+        import urllib.request
+        req = urllib.request.Request(JSONBLOB_URL, headers={'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            if isinstance(data, dict) and 'clients' in data:
+                return data
+    except Exception as e:
+        print(f'[DB] Cloud load error: {e}')
+    return None
+
+def _cloud_save(db):
+    """Save DB to JSONBlob (cloud persistence)."""
+    if not JSONBLOB_URL:
+        return
+    try:
+        import urllib.request
+        body = json.dumps(db, ensure_ascii=False).encode('utf-8')
+        req = urllib.request.Request(JSONBLOB_URL, data=body, method='PUT',
+                                     headers={'Content-Type': 'application/json'})
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        print(f'[DB] Cloud save error: {e}')
+
 def load_db():
+    # Try local file first
     if os.path.exists(DB_FILE):
         with open(DB_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
-    return {"clients": [], "fields": [], "alerts": [], "timeseries": {}, "version": 0}
+    # Fallback to cloud
+    cloud_data = _cloud_load()
+    if cloud_data:
+        # Cache locally
+        with open(DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cloud_data, f, indent=2, ensure_ascii=False)
+        print(f'[DB] Loaded from cloud: {len(cloud_data.get("clients",[]))} clients, {len(cloud_data.get("fields",[]))} fields')
+        return cloud_data
+    return dict(_DB_EMPTY)
 
 def save_db(db):
     db['version'] = db.get('version', 0) + 1
     db['updatedAt'] = now_iso()
+    # Save locally
     with open(DB_FILE, 'w', encoding='utf-8') as f:
         json.dump(db, f, indent=2, ensure_ascii=False)
+    # Save to cloud (async-safe, non-blocking on error)
+    _cloud_save(db)
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
