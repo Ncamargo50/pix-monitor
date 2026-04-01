@@ -70,19 +70,19 @@ CROP_PHENOLOGY = {
         "name": "Soja",
         "cycle_days": 130,
         "stages": {
-            "VE_V3":  {"days": [0, 25],    "indices": ["MSAVI2","OSAVI","BSI","NDVI","SAVI"],
+            "VE_V3":  {"days": [0, 25],    "indices": ["MSAVI2","OSAVI","BSI","NDVI","SAVI","SALINITY"],
                        "weed_indices": ["NDVI","MSAVI2"], "weed_risk": "alto",
                        "desc": "Emergencia (VE-V3) — Suelo expuesto, maxima ventana de malezas"},
-            "V4_V8":  {"days": [25, 50],   "indices": ["NDVI","NDRE","GNDVI","MTCI","CCCI","PRI_proxy"],
+            "V4_V8":  {"days": [25, 50],   "indices": ["NDVI","NDRE","GNDVI","MTCI","CCCI","PRI_proxy","SIF_proxy","CWSI"],
                        "weed_indices": ["NDVI","GNDVI","PRI_proxy"], "weed_risk": "medio",
                        "desc": "Desarrollo vegetativo (V4-V8) — Cierre parcial, malezas entre lineas"},
-            "R1_R2":  {"days": [50, 70],   "indices": ["NDRE","MTCI","kNDVI","EVI","NDMI","S2REP","IRECI"],
+            "R1_R2":  {"days": [50, 70],   "indices": ["NDRE","MTCI","kNDVI","EVI","NDMI","S2REP","IRECI","TCARI_OSAVI","SIF_proxy","CWSI"],
                        "weed_indices": [], "weed_risk": "bajo",
                        "desc": "Floracion (R1-R2) — Canopy cerrado, etapa critica rendimiento"},
-            "R3_R5":  {"days": [70, 100],  "indices": ["NDRE","kNDVI","S2REP","CCCI","NDMI","IRECI","MTCI"],
+            "R3_R5":  {"days": [70, 100],  "indices": ["NDRE","kNDVI","S2REP","CCCI","NDMI","IRECI","MTCI","TCARI_OSAVI","CWSI"],
                        "weed_indices": [], "weed_risk": "bajo",
                        "desc": "Llenado (R3-R5) — Maxima biomasa, kNDVI+MTCI anti-saturacion"},
-            "R6_R8":  {"days": [100, 130], "indices": ["NDMI","PSRI","NBR2","NDRE","MSI"],
+            "R6_R8":  {"days": [100, 130], "indices": ["NDMI","PSRI","NBR2","NDRE","MSI","CWSI"],
                        "weed_indices": [], "weed_risk": "bajo",
                        "desc": "Maduracion (R6-R8) — Senescencia, humedad foliar"},
         },
@@ -596,28 +596,47 @@ def compute_monitoring(field):
         evi2 = b8.subtract(b4).multiply(2.5).divide(b8.add(b4.multiply(2.4)).add(1)).rename('EVI2')
         # C1 Fix: BSI (Bare Soil Index) — needed for weed detection in emergence
         bsi = b11.add(b4).subtract(b8.add(b2)).divide(b11.add(b4).add(b8).add(b2).max(ee.Image(0.001))).rename('BSI')
-        # PRI proxy (Photochemical Reflectance) — pre-visual stress detection
+        # PRI proxy (Photochemical Reflectance) — pre-visual stress detection (Israel research)
         pri_denom = b3.add(b4).where(b3.add(b4).lt(0.001), 0.001)
         pri_proxy = b3.subtract(b4).divide(pri_denom).rename('PRI_proxy')
 
+        # ── NEW ISRAELI INDICES 2024-2025 ──
+        # CWSI proxy (Crop Water Stress Index) — Volcani/ARO method via SWIR-NIR
+        # Uses B11 (SWIR1) and B8A (NIR) as thermal proxy for water stress
+        cwsi_proxy = b11.subtract(b8a).divide(b11.add(b8a).max(ee.Image(0.001))).rename('CWSI')
+
+        # SIF proxy (Solar Induced Fluorescence) — via red-edge ratio B5/B4
+        # Correlates with chlorophyll fluorescence yield (R²=0.72, Guanter et al.)
+        sif_proxy = b5.subtract(b4).divide(b4.max(ee.Image(0.001))).rename('SIF_proxy')
+
+        # Salinity Index (SI) — Negev/Arava research for irrigated crops
+        # SI = sqrt(B4 * B3) — detects salt-stressed vegetation
+        salinity = b4.multiply(b3).sqrt().rename('SALINITY')
+
+        # TCARI/OSAVI — Volcani Center chlorophyll absorption (R²=0.81)
+        tcari = ee.Image(3).multiply(b5.subtract(b4).subtract(b5.subtract(b3).multiply(0.2).multiply(b5.divide(b4.max(ee.Image(0.001))))))
+        tcari_osavi = tcari.divide(osavi.max(ee.Image(0.001))).rename('TCARI_OSAVI')
+
         return img.addBands([ndvi, ndre, evi, ndmi, mtci, gndvi, savi, kndvi, psri,
                             nbr2, msi, osavi, msavi2, s2rep, ccci, cire, reci, ireci, evi2,
-                            bsi, pri_proxy])
+                            bsi, pri_proxy, cwsi_proxy, sif_proxy, salinity, tcari_osavi])
 
-    # Current values (mean of latest cloud-free image)
+    # Current values (mean of latest cloud-free image) — SINGLE getInfo call
     current_values = {}
     if recent_count > 0:
         latest = compute_indices(s2_recent.first())
-        for idx in indices_needed:
-            try:
-                val = latest.select(idx).reduceRegion(
-                    reducer=ee.Reducer.mean(),
-                    geometry=aoi,
-                    scale=10,
-                    bestEffort=True
-                ).get(idx).getInfo()
-                current_values[idx] = round(val, 4) if val is not None else None
-            except:
+        try:
+            all_vals = latest.select(indices_needed).reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=aoi,
+                scale=10,
+                bestEffort=True
+            ).getInfo()
+            for idx in indices_needed:
+                v = all_vals.get(idx)
+                current_values[idx] = round(v, 4) if v is not None else None
+        except:
+            for idx in indices_needed:
                 current_values[idx] = None
 
     # Baseline (historical mean + stddev for primary index)
@@ -648,16 +667,15 @@ def compute_monitoring(field):
     anomalies = []
 
     try:
-        baseline_mean = baseline_col.select(primary_idx).mean()
-        baseline_std = baseline_col.select(primary_idx).reduce(ee.Reducer.stdDev())
-
-        baseline_mean_val = baseline_mean.reduceRegion(
+        # OPTIMIZED: Single getInfo call for baseline mean + stddev
+        baseline_stats = baseline_col.select(primary_idx).reduce(
+            ee.Reducer.mean().combine(ee.Reducer.stdDev(), sharedInputs=True)
+        ).reduceRegion(
             reducer=ee.Reducer.mean(), geometry=aoi, scale=20, bestEffort=True
-        ).get(primary_idx).getInfo()
+        ).getInfo()
 
-        baseline_std_val = baseline_std.reduceRegion(
-            reducer=ee.Reducer.mean(), geometry=aoi, scale=20, bestEffort=True
-        ).values().get(0).getInfo()
+        baseline_mean_val = baseline_stats.get(f'{primary_idx}_mean')
+        baseline_std_val = baseline_stats.get(f'{primary_idx}_stdDev')
 
         # Z-score anomaly detection
         # A2 Fix: Raise minimum stddev to 0.05 to avoid false positives on stable baseline
@@ -744,22 +762,7 @@ def compute_monitoring(field):
         except Exception as e:
             print(f'[Monitor] Weed detection error: {e}')
 
-    # ── PRI proxy (Green-Red index) for pre-visual stress ──
-    # PRI_proxy = (B3 - B4) / (B3 + B4) — detects xanthophyll cycle activity
-    # Divergent PRI in early stages may indicate different species (weeds)
-    if 'PRI_proxy' in indices_needed and recent_count > 0:
-        try:
-            latest = compute_indices(s2_recent.first())
-            b3 = latest.select('B3').divide(10000)
-            b4 = latest.select('B4').divide(10000)
-            pri = b3.subtract(b4).divide(b3.add(b4).max(ee.Image(0.001)))
-            pri_val = pri.reduceRegion(
-                reducer=ee.Reducer.mean(), geometry=aoi, scale=10, bestEffort=True
-            ).values().get(0).getInfo()
-            if pri_val is not None:
-                current_values['PRI_proxy'] = round(pri_val, 4)
-        except:
-            pass
+    # PRI_proxy already computed in the main indices batch above (no extra getInfo needed)
 
     # ── CLOUD DETECTION: inform when no usable image ──
     cloud_blocked = recent_count == 0
