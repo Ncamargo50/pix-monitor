@@ -728,11 +728,14 @@ async function loadDashboard() {
                   ${fAlerts > 0 ? `<div style="color:var(--danger);font-size:10px;font-weight:600">${fAlerts}!</div>` : ''}
                 </div>
               </div>
-              <div style="display:flex;gap:4px;margin-top:6px">
-                ${!isActive && !paused ? `<button class="btn btn-primary btn-sm" style="flex:1;padding:4px 8px;font-size:11px" onclick="event.stopPropagation();activateMonitoring('${f.id}')">Activar</button>` : ''}
-                ${isActive ? `<button class="btn btn-secondary btn-sm" style="flex:1;padding:4px 8px;font-size:11px" onclick="event.stopPropagation();runCheck('${f.id}')">Verificar</button>` : ''}
-                ${isActive ? `<button class="btn btn-sm" style="padding:4px 8px;font-size:11px;background:var(--warning);color:#000" onclick="event.stopPropagation();pauseMonitoring('${f.id}')">Pausar</button>` : ''}
-                ${paused === 'admin_manual' ? `<button class="btn btn-primary btn-sm" style="flex:1;padding:4px 8px;font-size:11px" onclick="event.stopPropagation();resumeMonitoring('${f.id}')">Reanudar</button>` : ''}
+              <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">
+                ${!isActive && !paused ? `<button class="btn btn-primary btn-sm" style="flex:1;padding:4px 8px;font-size:11px" onclick="event.stopPropagation();runCheck('${f.id}')">Evaluar</button>` : ''}
+                ${!isActive && !paused ? `<button class="btn btn-secondary btn-sm" style="padding:4px 8px;font-size:11px" onclick="event.stopPropagation();activateMonitoring('${f.id}')">Monitoreo</button>` : ''}
+                ${isActive ? `<button class="btn btn-primary btn-sm" style="flex:1;padding:4px 8px;font-size:11px" onclick="event.stopPropagation();runCheck('${f.id}')">Verificar</button>` : ''}
+                ${isActive ? `<button class="btn btn-secondary btn-sm" style="padding:4px 8px;font-size:11px" onclick="event.stopPropagation();generateReport('${f.id}','pdf')">PDF</button>` : ''}
+                ${isActive ? `<button class="btn btn-sm" style="padding:4px 8px;font-size:11px;background:var(--danger);color:#fff" onclick="event.stopPropagation();cancelMonitoring('${f.id}')">Cancelar</button>` : ''}
+                ${paused === 'admin_manual' ? `<button class="btn btn-primary btn-sm" style="flex:1;padding:4px 8px;font-size:11px" onclick="event.stopPropagation();runCheck('${f.id}')">Evaluar</button>` : ''}
+                ${paused === 'admin_manual' ? `<button class="btn btn-secondary btn-sm" style="padding:4px 8px;font-size:11px" onclick="event.stopPropagation();resumeMonitoring('${f.id}')">Reanudar</button>` : ''}
                 ${paused === 'harvest_detected' ? '<span style="font-size:10px;color:var(--warning)">🌾 Cosecha</span>' : ''}
                 <button class="btn btn-sm" style="padding:4px 6px;color:var(--danger);font-size:11px" onclick="event.stopPropagation();deleteField('${f.id}')">✕</button>
               </div>
@@ -758,8 +761,13 @@ async function loadClients() {
   }
   container.innerHTML = data.clients.map(c => `
     <div class="card">
-      <div class="card-title">${esc(c.name)}</div>
-      <div class="card-sub">${esc(c.contact || '')} | ${esc(c.email || '')}</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="flex:1">
+          <div class="card-title">${esc(c.name)}</div>
+          <div class="card-sub">${esc(c.contact || '')} | ${esc(c.email || '')}</div>
+        </div>
+        <button class="btn btn-sm" style="padding:4px 8px;color:var(--danger);font-size:11px" onclick="deleteClient('${c.id}')">Borrar</button>
+      </div>
     </div>
   `).join('');
 }
@@ -805,9 +813,12 @@ async function loadFields() {
           <div class="card-title">${esc(f.name)}</div>
           <div class="card-sub">${f.crop} | ${f.areaHa || 0} ha | Siembra: ${f.plantingDate || '—'}</div>
         </div>
-        ${!f.monitoring?.active
-          ? `<button class="btn btn-primary btn-sm" onclick="activateMonitoring('${f.id}')">Activar</button>`
-          : `<button class="btn btn-secondary btn-sm" onclick="runCheck('${f.id}')">Verificar</button>`}
+        <div style="display:flex;gap:4px">
+          ${!f.monitoring?.active
+            ? `<button class="btn btn-primary btn-sm" onclick="runCheck('${f.id}')">Evaluar</button>`
+            : `<button class="btn btn-secondary btn-sm" onclick="runCheck('${f.id}')">Verificar</button>`}
+          <button class="btn btn-sm" style="padding:4px 8px;color:var(--danger);font-size:11px" onclick="deleteField('${f.id}')">Borrar</button>
+        </div>
       </div>
     </div>
   `).join('');
@@ -1005,9 +1016,11 @@ async function selectMapField(fieldId) {
         ${field.crop} | ${field.areaHa||0} ha | Etapa: ${field.monitoring?.currentStage||'—'}
         <br>Ultimo check: ${field.monitoring?.lastCheck?.slice(0,10)||'Nunca'}
       </div>
-      ${field.monitoring?.active
-        ? `<button class="btn btn-primary btn-sm btn-block" onclick="runCheck('${field.id}')">Verificar Ahora (GEE)</button>`
-        : `<button class="btn btn-primary btn-sm btn-block" onclick="activateMonitoring('${field.id}')">Activar Monitoreo</button>`}
+      <button class="btn btn-primary btn-sm btn-block" onclick="runCheck('${field.id}')" style="margin-bottom:4px">${field.monitoring?.active ? 'Verificar Ahora (GEE)' : 'Evaluar Cultivo (GEE)'}</button>
+      <button class="btn btn-secondary btn-sm btn-block" onclick="generateReport('${field.id}','pdf')" style="margin-bottom:4px">Descargar PDF</button>
+      ${!field.monitoring?.active
+        ? `<button class="btn btn-sm btn-block" style="background:var(--success);color:#fff" onclick="activateMonitoring('${field.id}')">Activar Monitoreo</button>`
+        : `<button class="btn btn-sm btn-block" style="background:var(--danger);color:#fff" onclick="cancelMonitoring('${field.id}')">Cancelar Monitoreo</button>`}
     </div>
     ${field.crop === 'pastura' ? `
     <div class="panel-section" id="pasturePanel">
@@ -1076,6 +1089,13 @@ async function pauseMonitoring(fieldId) {
 async function resumeMonitoring(fieldId) {
   await apiPost(`/fields/${fieldId}/resume`, {});
   toast('Monitoreo reanudado');
+  loadDashboard();
+}
+
+async function cancelMonitoring(fieldId) {
+  if (!confirm('Cancelar el monitoreo continuo de este lote?')) return;
+  await apiPost(`/fields/${fieldId}/pause`, {});
+  toast('Monitoreo cancelado');
   loadDashboard();
 }
 
