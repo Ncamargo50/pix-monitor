@@ -71,10 +71,10 @@
     .form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 
     /* Stats */
-    .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
-    .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center}
-    .stat-value{font-size:24px;font-weight:700;color:var(--teal)}
-    .stat-label{font-size:11px;color:var(--text-muted);margin-top:2px}
+    .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+    .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center}
+    .stat-value{font-size:18px;font-weight:700;color:var(--teal)}
+    .stat-label{font-size:10px;color:var(--text-muted);margin-top:1px}
     .stat-card.danger .stat-value{color:var(--danger)}
     .stat-card.warning .stat-value{color:var(--warning)}
 
@@ -234,7 +234,7 @@
 
     <!-- DASHBOARD -->
     <div id="view-dashboard" class="view active" style="padding:20px;overflow-y:auto;height:calc(100vh - 56px)">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">
         <div>
           <div style="font-size:20px;font-weight:700">Dashboard de Monitoreo</div>
           <div style="font-size:13px;color:var(--text-muted)">Vista general de clientes, haciendas y lotes</div>
@@ -256,7 +256,7 @@
       </div>
 
       <!-- Filters -->
-      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
         <select class="form-input" id="dashFilterClient" onchange="loadDashboard()" style="width:auto;min-width:150px;padding:6px 10px;font-size:12px">
           <option value="">Todos los clientes</option>
         </select>
@@ -273,7 +273,7 @@
 
       <!-- Map -->
       <div style="border-radius:12px;overflow:hidden;border:1px solid var(--border);margin-bottom:16px;position:relative">
-        <div id="dashMap" style="height:calc(100vh - 340px);min-height:350px;width:100%;background:var(--dark-3)"></div>
+        <div id="dashMap" style="height:calc(100vh - 300px);min-height:300px;width:100%;background:var(--dark-3)"></div>
         <div style="position:absolute;top:10px;left:10px;background:rgba(10,18,32,0.85);backdrop-filter:blur(8px);padding:6px 12px;border-radius:8px;font-size:11px;color:var(--text-muted);z-index:500;border:1px solid var(--border)">
           <span style="color:var(--teal);font-weight:600">Mapa de Lotes</span> — click para detalles
         </div>
@@ -671,7 +671,7 @@ async function loadDashboard() {
 
     const container = document.getElementById('dashFields');
     if (filtered.length === 0) {
-      container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)"><div style="font-size:48px;margin-bottom:12px">🌾</div><div style="font-size:16px;font-weight:600">Sin lotes</div><div style="font-size:13px;margin-top:4px">Cadastra clientes y lotes para comenzar</div></div>';
+      container.innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-muted)"><div style="font-size:13px">Sin lotes — Cadastra clientes y lotes para comenzar</div></div>';
       return;
     }
 
