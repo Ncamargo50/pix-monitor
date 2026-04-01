@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+monitoring.db.json
+*.key.json
+.env
