@@ -100,7 +100,14 @@ class UnifiedHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        path = urlparse(self.path).path.rstrip('/')
+        path = urlparse(self.path).path
+
+        # Root → index.html
+        if path == '/' or path == '':
+            self._serve_static('/')
+            return
+
+        path = path.rstrip('/')
 
         # ── API Routes ──
         if path == '/api/health':
