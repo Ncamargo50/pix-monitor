@@ -717,7 +717,7 @@ def compute_monitoring(field):
             all_indices = list(set(indices_needed + ['NDVI']))
             reducer = ee.Reducer.mean()
             reduce_result = latest.select(all_indices).reduceRegion(
-                reducer=reducer, geometry=aoi, scale=10, bestEffort=True
+                reducer=reducer, geometry=aoi, scale=20, bestEffort=True
             ).getInfo()
 
             for idx in all_indices:
@@ -743,7 +743,7 @@ def compute_monitoring(field):
             try:
                 ndvi_stats = latest.select('NDVI').reduceRegion(
                     reducer=ee.Reducer.stdDev().combine(ee.Reducer.percentile([90]), sharedInputs=True),
-                    geometry=aoi, scale=10, bestEffort=True
+                    geometry=aoi, scale=20, bestEffort=True
                 ).getInfo()
                 weed_ndvi_std = ndvi_stats.get('NDVI_stdDev', 0) or 0
                 weed_ndvi_p90 = ndvi_stats.get('NDVI_p90', 0) or 0
