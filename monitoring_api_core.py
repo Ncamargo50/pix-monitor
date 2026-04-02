@@ -1685,6 +1685,95 @@ def compute_monitoring(field):
 
 REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reports')
 
+
+def generate_health_map(field, stage_key):
+    """Generate ISI (Integrated Health Index) map as PNG from GEE.
+    Combines multiple indices weighted by phenological stage relevance.
+    Returns: path to saved PNG file, or None if failed.
+    """
+    if not init_gee():
+        return None
+    import ee
+    try:
+        boundary = field['boundary']
+        geom_type = boundary.get('type', 'Polygon')
+        if geom_type == 'MultiPolygon':
+            ring = boundary['coordinates'][0][0]
+        else:
+            ring = boundary['coordinates'][0]
+        ring_2d = [[p[0], p[1]] for p in ring if len(p) >= 2]
+        aoi = ee.Geometry({"type": "Polygon", "coordinates": [ring_2d]}, proj='EPSG:4326', evenOdd=False)
+
+        now = ee.Date(datetime.now(timezone.utc).strftime('%Y-%m-%d'))
+        search_start = now.advance(-60, 'day')
+
+        def mask_clouds(img):
+            scl = img.select('SCL')
+            return img.updateMask(scl.eq(4).Or(scl.eq(5)).Or(scl.eq(6)).Or(scl.eq(7)))
+
+        col = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+            .filterBounds(aoi).filterDate(search_start, now)
+            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 40))
+            .sort('system:time_start', False).limit(5).map(mask_clouds))
+
+        if col.size().getInfo() == 0:
+            return None
+
+        img = col.first()
+        b3 = img.select('B3').divide(10000)
+        b4 = img.select('B4').divide(10000)
+        b5 = img.select('B5').divide(10000)
+        b6 = img.select('B6').divide(10000)
+        b8 = img.select('B8').divide(10000)
+        b8a = img.select('B8A').divide(10000)
+        b11 = img.select('B11').divide(10000)
+
+        ndvi = b8.subtract(b4).divide(b8.add(b4))
+        ndre = b8a.subtract(b5).divide(b8a.add(b5))
+        ndmi = b8a.subtract(b11).divide(b8a.add(b11))
+        osavi = b8.subtract(b4).multiply(1.16).divide(b8.add(b4).add(0.16))
+        tcari = ee.Image(3).multiply(b5.subtract(b4).subtract(b5.subtract(b3).multiply(0.2).multiply(b5.divide(b4.max(ee.Image(0.001))))))
+        tcari_osavi = tcari.divide(osavi.max(ee.Image(0.001)))
+        cwsi = b11.subtract(b8a).divide(b11.add(b8a).max(ee.Image(0.001)))
+        sif = b5.subtract(b4).divide(b4.max(ee.Image(0.001)))
+
+        # ISI = weighted combination normalized 0-1
+        # Positive: NDVI, NDRE, SIF (higher=healthier)
+        # Negative: CWSI, TCARI_OSAVI (higher=more stress)
+        isi = (ndvi.multiply(0.25)
+               .add(ndre.multiply(0.20))
+               .add(sif.clamp(0, 2).divide(2).multiply(0.15))
+               .add(ndmi.add(0.5).multiply(0.15))
+               .subtract(cwsi.clamp(-0.5, 0.5).add(0.5).multiply(0.10))
+               .subtract(tcari_osavi.clamp(0, 5).divide(5).multiply(0.15))
+              ).clamp(0, 1).rename('ISI')
+
+        # Color palette: red -> yellow -> green
+        vis = {'min': 0.1, 'max': 0.7, 'palette': ['#991B1B','#EF4444','#F5A623','#FCD34D','#7FD633','#22C55E','#15803D']}
+
+        thumb_url = isi.clip(aoi).getThumbURL({
+            'region': aoi.bounds().getInfo()['coordinates'],
+            'dimensions': '400x400',
+            'format': 'png',
+            'min': vis['min'], 'max': vis['max'],
+            'palette': vis['palette']
+        })
+
+        # Download thumbnail
+        import urllib.request
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        map_filename = f'ISI_map_{field.get("name","lote")}_{datetime.now().strftime("%Y%m%d")}.png'.replace(' ', '_')
+        map_path = os.path.join(REPORTS_DIR, map_filename)
+        urllib.request.urlretrieve(thumb_url, map_path)
+        print(f'[Map] ISI health map saved: {map_path} ({os.path.getsize(map_path)} bytes)')
+        return map_path
+
+    except Exception as e:
+        print(f'[Map] ISI map error: {e}')
+        traceback.print_exc()
+        return None
+
+
 def generate_report(field, client, alerts, timeseries):
     """Generate PDF geo-report with colored map, Israeli indices, anomaly navigation, and WhatsApp message."""
     import io, zipfile, urllib.parse
@@ -1833,42 +1922,46 @@ def generate_report(field, client, alerts, timeseries):
         story.append(Paragraph('PIX Monitor — Informe de Evaluacion Satelital', styles['T1']))
         story.append(Paragraph(f'Cliente: <b>{client_name}</b> | Lote: <b>{field_name}</b> | Cultivo: <b>{crop_cfg.get("name", crop)}</b> | {date_str}', styles['Sub']))
 
-        # ── MAP (SVG polygon drawing) ──
-        story.append(Paragraph('1. Mapa del Lote', styles['H2']))
-        if coords_2d:
+        # ── MAP: ISI (Integrated Health Index) from GEE ──
+        story.append(Paragraph('1. Mapa de Salud del Cultivo (ISI)', styles['H2']))
+        story.append(Paragraph('Indice de Salud Integrado: fusion TCARI/OSAVI + CWSI + SIF + NDVI + NDRE + NDMI', styles['Body']))
+
+        # Generate ISI map from GEE
+        isi_map_path = generate_health_map(field, stage)
+        if isi_map_path and os.path.exists(isi_map_path):
+            story.append(Image(isi_map_path, width=170*mm, height=100*mm))
+            story.append(Paragraph(
+                f'<font color="#15803D">&#9632;</font> Sano &nbsp; '
+                f'<font color="#7FD633">&#9632;</font> Bueno &nbsp; '
+                f'<font color="#FCD34D">&#9632;</font> Moderado &nbsp; '
+                f'<font color="#F5A623">&#9632;</font> Atencion &nbsp; '
+                f'<font color="#EF4444">&#9632;</font> Critico &nbsp; '
+                f'<font color="#991B1B">&#9632;</font> Severo',
+                ParagraphStyle(name='Legend', fontSize=8, textColor=HexColor('#94A3B8'), spaceAfter=4)
+            ))
+        else:
+            # Fallback: SVG polygon with health color
             map_w, map_h = 170*mm, 80*mm
             d = Drawing(map_w, map_h)
             d.add(Rect(0, 0, map_w, map_h, fillColor=HexColor('#0F1B2D'), strokeColor=HexColor('#334155')))
-
-            # Transform coords to drawing space
-            lngs = [c[0] for c in coords_2d]
-            lats = [c[1] for c in coords_2d]
-            min_lng, max_lng = min(lngs), max(lngs)
-            min_lat, max_lat = min(lats), max(lats)
-            pad = 15
-            rng_lng = max(max_lng - min_lng, 0.001)
-            rng_lat = max(max_lat - min_lat, 0.001)
-            scale = min((map_w - 2*pad) / rng_lng, (map_h - 2*pad) / rng_lat)
-
-            pts = []
-            for c in coords_2d:
-                x = pad + (c[0] - min_lng) * scale
-                y = pad + (c[1] - min_lat) * scale
-                pts.extend([x, y])
-
-            fill = HexColor('#22C55E') if health in ['EXCELENTE','BUENO'] else HexColor('#F5A623') if health == 'MODERADO' else HexColor('#EF4444')
-            d.add(RLPolygon(pts, fillColor=fill, fillOpacity=0.4, strokeColor=HexColor('#7FD633'), strokeWidth=2))
-
-            # Center marker
-            cx = pad + (center_lng - min_lng) * scale
-            cy = pad + (center_lat - min_lat) * scale
-            d.add(Circle(cx, cy, 4, fillColor=HexColor('#FFFFFF'), strokeColor=HexColor('#EF4444'), strokeWidth=2))
-
-            # Label
-            d.add(String(pad, map_h - 12, f'{field_name} — {health}', fontSize=9, fillColor=white, fontName='Helvetica-Bold'))
-            d.add(String(pad, 4, f'Centro: {center_lat:.5f}, {center_lng:.5f} | Area: {field.get("areaHa",0)} ha', fontSize=7, fillColor=HexColor('#94A3B8')))
-
+            if coords_2d:
+                lngs = [c[0] for c in coords_2d]
+                lats = [c[1] for c in coords_2d]
+                min_lng, max_lng = min(lngs), max(lngs)
+                min_lat, max_lat = min(lats), max(lats)
+                pad = 15
+                rng_lng = max(max_lng - min_lng, 0.001)
+                rng_lat = max(max_lat - min_lat, 0.001)
+                sc = min((map_w - 2*pad) / rng_lng, (map_h - 2*pad) / rng_lat)
+                pts = []
+                for c in coords_2d:
+                    pts.extend([pad + (c[0] - min_lng) * sc, pad + (c[1] - min_lat) * sc])
+                fill = HexColor('#22C55E') if health in ['EXCELENTE','BUENO'] else HexColor('#F5A623') if health == 'MODERADO' else HexColor('#EF4444')
+                d.add(RLPolygon(pts, fillColor=fill, fillOpacity=0.4, strokeColor=HexColor('#7FD633'), strokeWidth=2))
+                d.add(String(pad, map_h - 12, f'{field_name} — {health} (sin mapa satelital)', fontSize=9, fillColor=white, fontName='Helvetica-Bold'))
             story.append(d)
+
+        story.append(Paragraph(f'Centro: {center_lat:.5f}, {center_lng:.5f} | Area: {field.get("areaHa",0)} ha | Imagen: {image_date}', ParagraphStyle(name='MapInfo', fontSize=8, textColor=HexColor('#94A3B8'), spaceAfter=4)))
         story.append(Spacer(1, 8))
 
         # ── ESTADO DEL CULTIVO ──
