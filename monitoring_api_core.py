@@ -706,24 +706,50 @@ def compute_monitoring(field):
     current_values = {}
     weed_ndvi_std = None
     weed_ndvi_p90 = None
+    image_date = None
 
     if not cloud_blocked:
         latest = compute_indices(s2_recent.first())
 
-        # Build combined reducer: mean for all indices + stdDev+P90 for NDVI (weed detection)
-        # getInfo #2: ALL current values + weed stats in ONE call
+        # Get image date
         try:
-            # Select all needed indices plus always include NDVI for weed/harvest detection
+            image_date = ee.Date(s2_recent.first().get('system:time_start')).format('YYYY-MM-dd').getInfo()
+        except:
+            pass
+
+        # getInfo #2: ALL current values in ONE call
+        try:
             all_indices = list(set(indices_needed + ['NDVI']))
-            reducer = ee.Reducer.mean()
             reduce_result = latest.select(all_indices).reduceRegion(
-                reducer=reducer, geometry=aoi, scale=20, bestEffort=True
+                reducer=ee.Reducer.mean(), geometry=aoi, scale=20, bestEffort=True
             ).getInfo()
 
             for idx in all_indices:
                 v = reduce_result.get(idx)
                 current_values[idx] = round(v, 4) if v is not None else None
             print(f'[GEE] Indices computed: {len(current_values)} values ({time.time()-t0:.1f}s)')
+
+            # FALLBACK: If all values are None (cloud mask removed everything),
+            # try the COMPOSITE median of all images WITHOUT cloud mask
+            all_none = all(v is None for v in current_values.values())
+            if all_none and is_first_check:
+                print(f'[GEE] All values None — trying composite without cloud mask...')
+                search_start = now.advance(-120, 'day')
+                raw_col = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+                    .filterBounds(aoi)
+                    .filterDate(search_start, now)
+                    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 50))
+                    .limit(20))
+                composite = compute_indices(raw_col.median())
+                raw_result = composite.select(all_indices).reduceRegion(
+                    reducer=ee.Reducer.mean(), geometry=aoi, scale=20, bestEffort=True
+                ).getInfo()
+                for idx in all_indices:
+                    v = raw_result.get(idx)
+                    current_values[idx] = round(v, 4) if v is not None else None
+                non_null = sum(1 for v in current_values.values() if v is not None)
+                print(f'[GEE] Composite fallback: {non_null}/{len(all_indices)} indices ({time.time()-t0:.1f}s)')
+
         except Exception as e:
             print(f'[GEE] Index error: {e}')
             traceback.print_exc()
@@ -895,6 +921,8 @@ def compute_monitoring(field):
         "weedAlert": weed_alert,
         "weedRisk": stage_cfg.get('weed_risk', 'bajo') if stage_cfg else 'bajo',
         "checkedAt": now_iso(),
+        "imageDate": image_date,
+        "searchDaysUsed": search_days_used,
         "elapsedSeconds": elapsed
     }
 
