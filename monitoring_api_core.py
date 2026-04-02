@@ -1686,8 +1686,8 @@ def compute_monitoring(field):
 REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reports')
 
 def generate_report(field, client, alerts, timeseries):
-    """Generate PDF report + KMZ file with anomaly waypoints for Avenza Maps."""
-    import io
+    """Generate PDF geo-report with colored map, Israeli indices, anomaly navigation, and WhatsApp message."""
+    import io, zipfile, urllib.parse
     os.makedirs(REPORTS_DIR, exist_ok=True)
 
     field_name = field.get('name', 'Lote')
@@ -1695,243 +1695,316 @@ def generate_report(field, client, alerts, timeseries):
     date_str = datetime.now().strftime('%Y-%m-%d')
     stage = field.get('monitoring', {}).get('currentStage', '—')
     client_name = client.get('name', '—') if client else '—'
+    client_phone = client.get('contact', '') if client else ''
+
+    # Get boundary coords
+    boundary = field.get('boundary', {})
+    geom_type = boundary.get('type', 'Polygon')
+    if geom_type == 'MultiPolygon':
+        coords = boundary.get('coordinates', [[[]]])[0][0]
+    else:
+        coords = boundary.get('coordinates', [[]])[0]
+    coords_2d = [[c[0], c[1]] for c in coords if len(c) >= 2]
+
+    # Calculate centroid
+    if coords_2d:
+        center_lng = sum(c[0] for c in coords_2d) / len(coords_2d)
+        center_lat = sum(c[1] for c in coords_2d) / len(coords_2d)
+    else:
+        center_lng, center_lat = -63.0, -17.5
+
+    # Get last check values
+    last_ts = timeseries[-1] if timeseries else {}
+    current_values = last_ts.get('values', {})
+    z_score = last_ts.get('zScore')
+    image_date = last_ts.get('date', '')[:10] if last_ts.get('date') else '—'
+
+    # Determine health status
+    ndvi = current_values.get('NDVI')
+    if ndvi is None:
+        health = 'SIN DATOS'
+        health_color = '#6B7280'
+    elif ndvi > 0.65:
+        health = 'EXCELENTE'
+        health_color = '#22C55E'
+    elif ndvi > 0.45:
+        health = 'BUENO'
+        health_color = '#7FD633'
+    elif ndvi > 0.30:
+        health = 'MODERADO'
+        health_color = '#F5A623'
+    elif ndvi > 0.15:
+        health = 'BAJO'
+        health_color = '#EF4444'
+    else:
+        health = 'CRITICO / POST-COSECHA'
+        health_color = '#991B1B'
+
+    # Stage config
+    crop_cfg = CROP_PHENOLOGY.get(crop, {})
+    stage_cfg_report = None
+    for sk, sv in crop_cfg.get('stages', {}).items():
+        if sk == stage:
+            stage_cfg_report = sv
+            break
+    primary_idx = stage_cfg_report.get('primary', 'NDVI') if stage_cfg_report else 'NDVI'
+    primary_reason = stage_cfg_report.get('reason', '') if stage_cfg_report else ''
+    stage_desc = stage_cfg_report.get('desc', stage) if stage_cfg_report else stage
+
+    # Google Maps link for navigation
+    gmaps_link = f'https://www.google.com/maps?q={center_lat},{center_lng}&z=16'
 
     # ── KMZ (KML zipped) for Avenza Maps ──
-    kml_content = f'''<?xml version="1.0" encoding="UTF-8"?>
+    kml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
 <Document>
-  <name>PIX Monitor - {field_name} - Anomalias {date_str}</name>
-  <description>Reporte de anomalias para navegacion en campo (Avenza Maps)</description>
+  <name>PIX Monitor - {field_name} - {date_str}</name>
+  <description>Reporte georreferenciado para navegacion a campo</description>
+  <Style id="green"><LineStyle><color>ff33d67f</color><width>3</width></LineStyle><PolyStyle><color>4033d67f</color></PolyStyle></Style>
+  <Style id="yellow"><LineStyle><color>ff00aaff</color><width>3</width></LineStyle><PolyStyle><color>4000aaff</color></PolyStyle></Style>
+  <Style id="red"><LineStyle><color>ff0000ff</color><width>3</width></LineStyle><PolyStyle><color>400000ff</color></PolyStyle></Style>
+  <Style id="alertPin"><IconStyle><color>ff0000ff</color><scale>1.3</scale><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/red-pushpin.png</href></Icon></IconStyle></Style>
 
-  <Style id="alertCritical">
-    <IconStyle><color>ff0000ff</color><scale>1.4</scale>
-      <Icon><href>http://maps.google.com/mapfiles/kml/pushpin/red-pushpin.png</href></Icon>
-    </IconStyle>
-  </Style>
-  <Style id="alertWarning">
-    <IconStyle><color>ff00aaff</color><scale>1.2</scale>
-      <Icon><href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href></Icon>
-    </IconStyle>
-  </Style>
-
-  <Folder>
-    <name>Perimetro del Lote</name>
+  <Folder><name>Lote {field_name}</name>
     <Placemark>
       <name>{field_name}</name>
-      <description>Cultivo: {crop} | Area: {field.get("areaHa", 0)} ha | Etapa: {stage}</description>
-      <Style><LineStyle><color>ff33d67f</color><width>3</width></LineStyle><PolyStyle><color>3033d67f</color></PolyStyle></Style>
+      <description>Cultivo: {crop} | Area: {field.get("areaHa", 0)} ha | Estado: {health} | NDVI: {f'{ndvi:.3f}' if ndvi else '—'}</description>
+      <styleUrl>#{'green' if health in ['EXCELENTE','BUENO'] else 'yellow' if health == 'MODERADO' else 'red'}</styleUrl>
       <Polygon><outerBoundaryIs><LinearRing><coordinates>
-'''
-
-    # Add boundary coordinates
-    boundary = field.get('boundary', {})
-    coords = boundary.get('coordinates', [[]])[0] if boundary.get('type') == 'Polygon' else boundary.get('coordinates', [[[]]])[0][0]
-    for c in coords:
-        if len(c) >= 2:
-            kml_content += f'        {c[0]},{c[1]},0\n'
-
-    kml_content += '''      </coordinates></LinearRing></outerBoundaryIs></Polygon>
+"""
+    for c in coords_2d:
+        kml_content += f'        {c[0]},{c[1]},0\n'
+    kml_content += """      </coordinates></LinearRing></outerBoundaryIs></Polygon>
     </Placemark>
   </Folder>
 
-  <Folder>
-    <name>Anomalias Detectadas</name>
-'''
-
-    # Add anomaly waypoints
-    for i, alert in enumerate(alerts):
-        severity = alert.get('severity', 'warning')
-        style = 'alertCritical' if severity == 'critical' else 'alertWarning'
-        z = alert.get('zScore', 0)
-        idx = alert.get('index', 'NDVI')
-        desc = alert.get('description', 'Anomalia detectada')
-        centroid = alert.get('centroid', [0, 0])
-
-        # Use field center if no centroid
-        if centroid == [0, 0] and coords:
-            lats = [c[1] for c in coords if len(c) >= 2]
-            lngs = [c[0] for c in coords if len(c) >= 2]
-            centroid = [sum(lngs)/len(lngs), sum(lats)/len(lats)] if lats else [0, 0]
-
-        kml_content += f'''    <Placemark>
-      <name>Anomalia-{i+1} (Z={z})</name>
-      <description>{desc}
-Indice: {idx} = {alert.get("currentValue", "—")}
-Baseline: {alert.get("baselineMean", "—")}
-Severidad: {severity.upper()}
-Fecha: {alert.get("date", "—")[:10]}</description>
-      <styleUrl>#{style}</styleUrl>
-      <Point><coordinates>{centroid[0]},{centroid[1]},0</coordinates></Point>
+  <Folder><name>Punto de Acceso</name>
+    <Placemark>
+      <name>Centro del Lote</name>
+      <description>Navegar aqui para inspeccion de campo</description>
+      <Point><coordinates>""" + f'{center_lng},{center_lat},0' + """</coordinates></Point>
     </Placemark>
-'''
+  </Folder>
+"""
+    if alerts:
+        kml_content += "  <Folder><name>Anomalias</name>\n"
+        for i, a in enumerate(alerts):
+            kml_content += f"""    <Placemark>
+      <name>Anomalia-{i+1} (Z={a.get('zScore','?')})</name>
+      <description>{a.get('description','')[:200]}</description>
+      <styleUrl>#alertPin</styleUrl>
+      <Point><coordinates>{center_lng},{center_lat},0</coordinates></Point>
+    </Placemark>
+"""
+        kml_content += "  </Folder>\n"
+    kml_content += "</Document>\n</kml>"
 
-    kml_content += '''  </Folder>
-</Document>
-</kml>'''
-
-    # Save KMZ (zipped KML)
-    import zipfile
-    kmz_filename = f'PIX_Monitor_{field_name}_{date_str}.kmz'
+    kmz_filename = f'PIX_{field_name}_{date_str}.kmz'.replace(' ', '_')
     kmz_path = os.path.join(REPORTS_DIR, kmz_filename)
     with zipfile.ZipFile(kmz_path, 'w', zipfile.ZIP_DEFLATED) as zf:
         zf.writestr('doc.kml', kml_content)
 
-    # ── PDF Report ──
-    pdf_filename = f'PIX_Monitor_{field_name}_{date_str}.pdf'
+    # ── PDF REPORT with map and indices ──
+    pdf_filename = f'PIX_{field_name}_{date_str}.pdf'.replace(' ', '_')
     pdf_path = os.path.join(REPORTS_DIR, pdf_filename)
 
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.units import mm
-        from reportlab.lib.colors import HexColor
+        from reportlab.lib.colors import HexColor, white, black
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+        from reportlab.graphics.shapes import Drawing, Rect, String, Polygon as RLPolygon, Circle
+        from reportlab.graphics import renderPDF
 
-        doc = SimpleDocTemplate(pdf_path, pagesize=A4, topMargin=20*mm, bottomMargin=15*mm, leftMargin=15*mm, rightMargin=15*mm)
+        W, H = A4
+        doc = SimpleDocTemplate(pdf_path, pagesize=A4, topMargin=15*mm, bottomMargin=10*mm, leftMargin=12*mm, rightMargin=12*mm)
         styles = getSampleStyleSheet()
-        styles.add(ParagraphStyle(name='PIXTitle', fontSize=18, spaceAfter=6, textColor=HexColor('#7FD633'), fontName='Helvetica-Bold'))
-        styles.add(ParagraphStyle(name='PIXSub', fontSize=11, spaceAfter=12, textColor=HexColor('#94A3B8')))
-        styles.add(ParagraphStyle(name='PIXBody', fontSize=10, spaceAfter=6, leading=14))
-        styles.add(ParagraphStyle(name='PIXH2', fontSize=14, spaceAfter=8, textColor=HexColor('#00A4CC'), fontName='Helvetica-Bold'))
+        styles.add(ParagraphStyle(name='T1', fontSize=16, spaceAfter=4, textColor=HexColor('#7FD633'), fontName='Helvetica-Bold'))
+        styles.add(ParagraphStyle(name='Sub', fontSize=10, spaceAfter=8, textColor=HexColor('#94A3B8')))
+        styles.add(ParagraphStyle(name='Body', fontSize=9, spaceAfter=4, leading=12))
+        styles.add(ParagraphStyle(name='H2', fontSize=12, spaceAfter=6, textColor=HexColor('#00A4CC'), fontName='Helvetica-Bold'))
+        styles.add(ParagraphStyle(name='H3', fontSize=10, spaceAfter=4, textColor=HexColor('#7FD633'), fontName='Helvetica-Bold'))
+        styles.add(ParagraphStyle(name='Foot', fontSize=7, textColor=HexColor('#64748B')))
 
         story = []
 
-        # Header
-        story.append(Paragraph('PIX Monitor — Reporte de Monitoreo', styles['PIXTitle']))
-        story.append(Paragraph(f'Cliente: {client_name} | Lote: {field_name} | Cultivo: {crop} | Fecha: {date_str}', styles['PIXSub']))
-        story.append(Spacer(1, 10))
+        # ── HEADER ──
+        story.append(Paragraph('PIX Monitor — Informe de Evaluacion Satelital', styles['T1']))
+        story.append(Paragraph(f'Cliente: <b>{client_name}</b> | Lote: <b>{field_name}</b> | Cultivo: <b>{crop_cfg.get("name", crop)}</b> | {date_str}', styles['Sub']))
 
-        # Field info
-        story.append(Paragraph('1. Informacion del Lote', styles['PIXH2']))
-        info_data = [
+        # ── MAP (SVG polygon drawing) ──
+        story.append(Paragraph('1. Mapa del Lote', styles['H2']))
+        if coords_2d:
+            map_w, map_h = 170*mm, 80*mm
+            d = Drawing(map_w, map_h)
+            d.add(Rect(0, 0, map_w, map_h, fillColor=HexColor('#0F1B2D'), strokeColor=HexColor('#334155')))
+
+            # Transform coords to drawing space
+            lngs = [c[0] for c in coords_2d]
+            lats = [c[1] for c in coords_2d]
+            min_lng, max_lng = min(lngs), max(lngs)
+            min_lat, max_lat = min(lats), max(lats)
+            pad = 15
+            rng_lng = max(max_lng - min_lng, 0.001)
+            rng_lat = max(max_lat - min_lat, 0.001)
+            scale = min((map_w - 2*pad) / rng_lng, (map_h - 2*pad) / rng_lat)
+
+            pts = []
+            for c in coords_2d:
+                x = pad + (c[0] - min_lng) * scale
+                y = pad + (c[1] - min_lat) * scale
+                pts.extend([x, y])
+
+            fill = HexColor('#22C55E') if health in ['EXCELENTE','BUENO'] else HexColor('#F5A623') if health == 'MODERADO' else HexColor('#EF4444')
+            d.add(RLPolygon(pts, fillColor=fill, fillOpacity=0.4, strokeColor=HexColor('#7FD633'), strokeWidth=2))
+
+            # Center marker
+            cx = pad + (center_lng - min_lng) * scale
+            cy = pad + (center_lat - min_lat) * scale
+            d.add(Circle(cx, cy, 4, fillColor=HexColor('#FFFFFF'), strokeColor=HexColor('#EF4444'), strokeWidth=2))
+
+            # Label
+            d.add(String(pad, map_h - 12, f'{field_name} — {health}', fontSize=9, fillColor=white, fontName='Helvetica-Bold'))
+            d.add(String(pad, 4, f'Centro: {center_lat:.5f}, {center_lng:.5f} | Area: {field.get("areaHa",0)} ha', fontSize=7, fillColor=HexColor('#94A3B8')))
+
+            story.append(d)
+        story.append(Spacer(1, 8))
+
+        # ── ESTADO DEL CULTIVO ──
+        story.append(Paragraph('2. Estado del Cultivo', styles['H2']))
+        info = [
             ['Propiedad', 'Valor'],
-            ['Lote', field_name],
-            ['Cultivo', f'{crop} ({CROP_PHENOLOGY.get(crop, {}).get("name", crop)})'],
+            ['Estado general', f'{health}'],
+            ['Etapa fenologica', stage_desc],
+            ['Indice primario', f'{primary_idx} — {primary_reason}'],
+            ['Imagen Sentinel-2', image_date],
             ['Area', f'{field.get("areaHa", 0)} ha'],
-            ['Fecha siembra', field.get('plantingDate', '—')],
-            ['Etapa actual', f'{stage} ({field.get("monitoring", {}).get("currentStage", "—")})'],
-            ['Ultimo chequeo', field.get('monitoring', {}).get('lastCheck', '—')[:10] if field.get('monitoring', {}).get('lastCheck') else 'Nunca'],
+            ['Z-Score', f'{z_score}' if z_score else 'Sin baseline'],
         ]
-        t = Table(info_data, colWidths=[50*mm, 120*mm])
+        t = Table(info, colWidths=[45*mm, 125*mm])
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), HexColor('#1a2b3f')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#FFFFFF')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), white),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#334155')),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [HexColor('#0F1B2D'), HexColor('#162236')]),
             ('TEXTCOLOR', (0, 1), (-1, -1), HexColor('#E2E8F0')),
-            ('PADDING', (0, 0), (-1, -1), 6),
+            ('PADDING', (0, 0), (-1, -1), 5),
         ]))
         story.append(t)
-        story.append(Spacer(1, 16))
+        story.append(Spacer(1, 10))
 
-        # Alerts
-        story.append(Paragraph('2. Anomalias Detectadas', styles['PIXH2']))
-        if alerts:
-            alert_data = [['#', 'Indice', 'Valor', 'Baseline', 'Z-Score', 'Severidad', 'Fecha']]
-            for i, a in enumerate(alerts):
-                alert_data.append([
-                    str(i+1),
-                    a.get('index', '—'),
-                    str(a.get('currentValue', '—')),
-                    str(a.get('baselineMean', '—')),
-                    str(a.get('zScore', '—')),
-                    a.get('severity', '—').upper(),
-                    a.get('date', '—')[:10]
-                ])
-            at = Table(alert_data, colWidths=[10*mm, 20*mm, 22*mm, 22*mm, 22*mm, 28*mm, 28*mm])
-            at.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#7F1D1D')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#FFFFFF')),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 8),
-                ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#334155')),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [HexColor('#1C1917'), HexColor('#292524')]),
-                ('TEXTCOLOR', (0, 1), (-1, -1), HexColor('#FBBF24')),
-                ('PADDING', (0, 0), (-1, -1), 4),
-            ]))
-            story.append(at)
-        else:
-            story.append(Paragraph('Sin anomalias detectadas. Cultivo en estado normal.', styles['PIXBody']))
-        story.append(Spacer(1, 16))
+        # ── INDICES ESPECTRALES (incluye israelies) ──
+        story.append(Paragraph('3. Indices Espectrales', styles['H2']))
 
-        # Time series
-        story.append(Paragraph('3. Serie Temporal', styles['PIXH2']))
-        if timeseries:
-            ts_data = [['Fecha', 'Etapa', 'NDVI', 'NDRE', 'Z-Score']]
-            for t_entry in timeseries[-10:]:  # Last 10 entries
-                vals = t_entry.get('values', {})
-                ts_data.append([
-                    t_entry.get('date', '—')[:10],
-                    t_entry.get('stage', '—'),
-                    f'{vals.get("NDVI", 0):.3f}' if vals.get('NDVI') else '—',
-                    f'{vals.get("NDRE", 0):.3f}' if vals.get('NDRE') else '—',
-                    str(t_entry.get('zScore', '—'))
-                ])
-            tst = Table(ts_data, colWidths=[30*mm, 35*mm, 25*mm, 25*mm, 25*mm])
-            tst.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#1a2b3f')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#FFFFFF')),
+        israeli = ['TCARI_OSAVI', 'SIF_proxy', 'CWSI', 'SALINITY']
+        classic = ['NDVI', 'NDRE', 'EVI', 'NDMI', 'GNDVI', 'kNDVI', 'SAVI']
+        advanced = ['MTCI', 'S2REP', 'CCCI', 'IRECI', 'PSRI', 'NBR2', 'MSI', 'BSI', 'PRI_proxy', 'MSAVI2', 'OSAVI']
+
+        idx_data = [['Indice', 'Valor', 'Origen', 'Uso']]
+        for idx_name in israeli:
+            v = current_values.get(idx_name)
+            if v is not None:
+                origins = {'TCARI_OSAVI': 'Volcani Israel', 'SIF_proxy': 'Israel/Guanter', 'CWSI': 'Volcani/ARO', 'SALINITY': 'Negev/Arava'}
+                uses = {'TCARI_OSAVI': 'Clorofila R2=0.81', 'SIF_proxy': 'Fluorescencia R2=0.72', 'CWSI': 'Stress hidrico', 'SALINITY': 'Salinidad suelo'}
+                idx_data.append([idx_name, f'{v:.4f}', origins.get(idx_name, 'Israel'), uses.get(idx_name, '')])
+        for idx_name in classic + advanced:
+            v = current_values.get(idx_name)
+            if v is not None:
+                idx_data.append([idx_name, f'{v:.4f}', 'Sentinel-2', ''])
+
+        if len(idx_data) > 1:
+            it = Table(idx_data, colWidths=[30*mm, 25*mm, 35*mm, 55*mm])
+            it.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#1E3A5F')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), white),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('FONTSIZE', (0, 0), (-1, -1), 7),
                 ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#334155')),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [HexColor('#0F1B2D'), HexColor('#162236')]),
                 ('TEXTCOLOR', (0, 1), (-1, -1), HexColor('#E2E8F0')),
-                ('PADDING', (0, 0), (-1, -1), 4),
+                ('PADDING', (0, 0), (-1, -1), 3),
             ]))
-            story.append(tst)
+            # Highlight Israeli indices rows in green
+            for i in range(1, min(5, len(idx_data))):
+                it.setStyle(TableStyle([('TEXTCOLOR', (0, i), (0, i), HexColor('#7FD633'))]))
+            story.append(it)
         else:
-            story.append(Paragraph('Sin datos de serie temporal disponibles.', styles['PIXBody']))
-        story.append(Spacer(1, 16))
+            story.append(Paragraph('Sin datos de indices — zona nublada.', styles['Body']))
+        story.append(Spacer(1, 10))
 
-        # Navigation instructions
-        story.append(Paragraph('4. Navegacion a Campo', styles['PIXH2']))
-        story.append(Paragraph(
-            f'Para llegar a las anomalias detectadas, importe el archivo <b>{kmz_filename}</b> en Avenza Maps '
-            'o cualquier app GPS compatible con KMZ/KML. Los waypoints estan marcados con la severidad '
-            'correspondiente (rojo=critico, amarillo=warning).',
-            styles['PIXBody']
-        ))
+        # ── ANOMALIAS ──
+        story.append(Paragraph('4. Anomalias y Alertas', styles['H2']))
+        if alerts:
+            for i, a in enumerate(alerts):
+                sev = a.get('severity', 'warning').upper()
+                color = '#EF4444' if sev == 'CRITICAL' else '#F5A623'
+                story.append(Paragraph(f'<font color="{color}">&#9679;</font> Anomalia {i+1}: {a.get("description","")[:120]}', styles['Body']))
+                story.append(Paragraph(f'&nbsp;&nbsp;Z-Score: {a.get("zScore","—")} | Severidad: {sev}', styles['Body']))
+        else:
+            story.append(Paragraph('<font color="#22C55E">&#10004;</font> Sin anomalias detectadas. Cultivo en estado normal.', styles['Body']))
+        story.append(Spacer(1, 10))
+
+        # ── NAVEGACION A CAMPO ──
+        story.append(Paragraph('5. Navegacion a Campo', styles['H2']))
+        story.append(Paragraph(f'<b>Centro del lote:</b> {center_lat:.6f}, {center_lng:.6f}', styles['Body']))
+        story.append(Paragraph(f'<b>Google Maps:</b> <link href="{gmaps_link}">{gmaps_link}</link>', styles['Body']))
+        story.append(Paragraph(f'<b>KMZ para Avenza Maps:</b> {kmz_filename}', styles['Body']))
         story.append(Spacer(1, 8))
 
-        if alerts:
-            story.append(Paragraph('Coordenadas de anomalias:', styles['PIXBody']))
-            for i, a in enumerate(alerts):
-                centroid = a.get('centroid', [0, 0])
-                if centroid == [0, 0]:
-                    bcoords = field.get('boundary', {}).get('coordinates', [[]])[0]
-                    if bcoords:
-                        centroid = [sum(c[0] for c in bcoords)/len(bcoords), sum(c[1] for c in bcoords)/len(bcoords)]
-                story.append(Paragraph(
-                    f'  Anomalia-{i+1}: Lat {centroid[1]:.6f}, Lng {centroid[0]:.6f} | Z={a.get("zScore","—")} | {a.get("severity","").upper()}',
-                    styles['PIXBody']
-                ))
-
-        # Footer
-        story.append(Spacer(1, 24))
-        story.append(Paragraph(
-            f'Generado por PIX Monitor — Pixadvisor Agricultura de Precision | {date_str}',
-            ParagraphStyle(name='Footer', fontSize=8, textColor=HexColor('#64748B'))
-        ))
+        # ── FOOTER ──
+        story.append(Spacer(1, 16))
+        story.append(Paragraph(f'Generado por PIX Monitor — Pixadvisor Agricultura de Precision | www.pixadvisor.network | {date_str}', styles['Foot']))
 
         doc.build(story)
         print(f'[Report] PDF generated: {pdf_path}')
 
-    except ImportError:
-        # reportlab not installed — generate text report instead
+    except ImportError as e:
+        print(f'[Report] reportlab not installed: {e}')
         with open(pdf_path.replace('.pdf', '.txt'), 'w', encoding='utf-8') as f:
-            f.write(f'PIX Monitor — Reporte de Monitoreo\n')
+            f.write(f'PIX Monitor — Informe de Evaluacion Satelital\n')
             f.write(f'Cliente: {client_name} | Lote: {field_name} | Cultivo: {crop}\n')
-            f.write(f'Fecha: {date_str} | Etapa: {stage}\n\n')
-            f.write(f'Anomalias: {len(alerts)}\n')
-            for i, a in enumerate(alerts):
-                f.write(f'  {i+1}. {a.get("description","—")} | Z={a.get("zScore","—")}\n')
+            f.write(f'Estado: {health} | NDVI: {ndvi}\n')
+            f.write(f'Indice primario: {primary_idx} — {primary_reason}\n')
+            f.write(f'Google Maps: {gmaps_link}\n')
         pdf_filename = pdf_filename.replace('.pdf', '.txt')
-        pdf_path = pdf_path.replace('.pdf', '.txt')
-        print(f'[Report] Text report generated (reportlab not installed): {pdf_path}')
 
-    print(f'[Report] KMZ generated: {kmz_path}')
+    # ── WHATSAPP MESSAGE ──
+    wa_msg = f"""*PIX Monitor — {field_name}*
+_Informe de Evaluacion Satelital_
+
+*Cliente:* {client_name}
+*Lote:* {field_name} ({field.get('areaHa',0)} ha)
+*Cultivo:* {crop_cfg.get('name', crop)}
+*Etapa:* {stage_desc}
+*Estado:* {health}
+
+*Indices clave:*"""
+    if current_values.get('NDVI') is not None:
+        wa_msg += f"\n  NDVI: {current_values['NDVI']:.3f}"
+    if current_values.get('TCARI_OSAVI') is not None:
+        wa_msg += f"\n  TCARI/OSAVI (Israel): {current_values['TCARI_OSAVI']:.3f}"
+    if current_values.get('CWSI') is not None:
+        wa_msg += f"\n  CWSI (Stress hidrico): {current_values['CWSI']:.3f}"
+    if current_values.get('SIF_proxy') is not None:
+        wa_msg += f"\n  SIF (Fluorescencia): {current_values['SIF_proxy']:.3f}"
+
+    if alerts:
+        wa_msg += f"\n\n*{len(alerts)} Anomalias detectadas*"
+        for a in alerts[:3]:
+            wa_msg += f"\n  - {a.get('description','')[:60]}"
+
+    wa_msg += f"\n\n*Navegacion:* {gmaps_link}"
+    wa_msg += f"\n\n_Pixadvisor — Agricultura de Precision_"
+    wa_msg += f"\n_www.pixadvisor.network_"
+
+    # Generate WhatsApp URL
+    wa_url = None
+    if client_phone:
+        phone_clean = client_phone.replace('+', '').replace(' ', '').replace('-', '')
+        wa_url = f'https://wa.me/{phone_clean}?text={urllib.parse.quote(wa_msg)}'
 
     return {
         'pdf': pdf_filename,
@@ -1940,8 +2013,18 @@ Fecha: {alert.get("date", "—")[:10]}</description>
         'kmzPath': kmz_path,
         'alerts': len(alerts),
         'field': field_name,
-        'date': date_str
+        'date': date_str,
+        'health': health,
+        'healthColor': health_color,
+        'primaryIndex': primary_idx,
+        'googleMapsLink': gmaps_link,
+        'whatsappMessage': wa_msg,
+        'whatsappUrl': wa_url,
+        'centerLat': center_lat,
+        'centerLng': center_lng
     }
+
+
 
 
 # ============================================================
