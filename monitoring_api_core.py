@@ -1748,14 +1748,19 @@ def generate_health_map(field, stage_key):
 
         isi_smooth = isi.focal_mean(radius=60, units='meters', kernelType='gaussian').clip(aoi)
 
-        # Download as numpy array via getThumbURL
+        # Download COLORED image from GEE
+        colors_palette = [
+            '67000D', 'A50F15', 'CB181D', 'EF4444', 'F97316',
+            'FB923C', 'FBBF24', 'FDE68A', 'D9F99D', '86EFAC',
+            '4ADE80', '22C55E', '16A34A', '15803D', '14532D']
+
         region = aoi.bounds().buffer(50).getInfo()['coordinates']
         thumb_url = isi_smooth.getThumbURL({
             'region': region,
-            'dimensions': '300x300',
+            'dimensions': '500x500',
             'format': 'png',
-            'min': 0, 'max': 1,
-            'palette': ['000000', 'FFFFFF']  # grayscale for numpy conversion
+            'min': 0.05, 'max': 0.60,
+            'palette': colors_palette
         })
 
         import urllib.request
@@ -1765,41 +1770,33 @@ def generate_health_map(field, stage_key):
         import matplotlib.pyplot as plt
         from matplotlib.colors import LinearSegmentedColormap
         from matplotlib.patches import Polygon as MplPolygon
-        from matplotlib.collections import PatchCollection
         from PIL import Image as PILImage
 
-        # Download grayscale thumbnail
-        tmp_gray = os.path.join(REPORTS_DIR, '_tmp_gray.png')
-        urllib.request.urlretrieve(thumb_url, tmp_gray)
+        # Download colored thumbnail
+        tmp_color = os.path.join(REPORTS_DIR, '_tmp_color.png')
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        urllib.request.urlretrieve(thumb_url, tmp_color)
 
-        # Load as numpy array
-        pil_img = PILImage.open(tmp_gray).convert('L')
-        data = np.array(pil_img).astype(float) / 255.0  # normalize to 0-1
-
-        # Mask outside polygon (transparent pixels → NaN)
-        rgba = np.array(PILImage.open(tmp_gray).convert('RGBA'))
-        alpha = rgba[:, :, 3]
-        data[alpha < 128] = np.nan
+        # Load colored image
+        pil_img = PILImage.open(tmp_color).convert('RGBA')
+        img_array = np.array(pil_img)
 
         # Coordinate extents
         lngs = [c[0] for c in ring_2d]
         lats = [c[1] for c in ring_2d]
-        extent = [min(lngs) - 0.001, max(lngs) + 0.001, min(lats) - 0.001, max(lats) + 0.001]
+        extent = [min(lngs) - 0.001, max(lngs) + 0.001, max(lats) + 0.001, min(lats) - 0.001]
 
         # ── MATPLOTLIB: Professional Pixadvisor-style map ──
         fig, ax = plt.subplots(1, 1, figsize=(10, 8), facecolor='#F5F5F5')
         ax.set_facecolor('#E8E8E8')
 
-        # Custom colormap: Red → Orange → Yellow → Light Green → Dark Green
-        colors_cmap = ['#67000D', '#A50F15', '#CB181D', '#EF4444', '#F97316',
-                       '#FB923C', '#FBBF24', '#FDE68A', '#D9F99D', '#86EFAC',
-                       '#4ADE80', '#22C55E', '#16A34A', '#15803D', '#14532D']
-        cmap = LinearSegmentedColormap.from_list('pixadvisor_health', colors_cmap, N=256)
-        cmap.set_bad(color='#E8E8E8')
+        # Plot colored satellite image
+        im = ax.imshow(img_array, extent=extent, aspect='equal', interpolation='bilinear')
 
-        # Plot ISI raster
-        im = ax.imshow(data, extent=extent, origin='upper', cmap=cmap,
-                       vmin=0.05, vmax=0.65, interpolation='bilinear', aspect='equal')
+        # Create a ScalarMappable for colorbar
+        colors_hex = ['#' + c for c in colors_palette]
+        cmap = LinearSegmentedColormap.from_list('pix', colors_hex, N=256)
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0.05, vmax=0.60))
 
         # Draw perimeter
         poly_coords = [(c[0], c[1]) for c in ring_2d]
@@ -1829,7 +1826,7 @@ def generate_health_map(field, stage_key):
         ax.grid(True, alpha=0.3, linestyle='--', color='#999999')
 
         # Colorbar
-        cbar = plt.colorbar(im, ax=ax, shrink=0.75, pad=0.02, aspect=30)
+        cbar = plt.colorbar(sm, ax=ax, shrink=0.75, pad=0.02, aspect=30)
         cbar.set_label('Indice de Salud Integrado (ISI)', fontsize=9, color='#333333')
         cbar.ax.tick_params(labelsize=8)
         # Add zone labels
@@ -1852,8 +1849,8 @@ def generate_health_map(field, stage_key):
         plt.close(fig)
 
         # Cleanup temp
-        if os.path.exists(tmp_gray):
-            os.remove(tmp_gray)
+        if os.path.exists(tmp_color):
+            os.remove(tmp_color)
 
         # Download
         import urllib.request
