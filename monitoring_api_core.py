@@ -579,9 +579,9 @@ def compute_monitoring(field):
     # Strip Z coordinate if present (3D → 2D)
     ring_2d = [[p[0], p[1]] for p in ring]
     try:
-        aoi = ee.Geometry.Polygon([ring_2d])
+        aoi = ee.Geometry({"type": "Polygon", "coordinates": [ring_2d]}, proj='EPSG:4326', evenOdd=False)
     except Exception as e:
-        print(f'[GEE] Geometry error: {e}, points: {len(ring_2d)}')
+        print(f'[GEE] Geometry error: {e}, points: {len(ring_2d)}, first: {ring_2d[0]}')
         return {"error": f"Invalid geometry: {str(e)[:100]}"}
 
     # Date range
