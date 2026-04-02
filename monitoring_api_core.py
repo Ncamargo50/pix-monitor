@@ -1748,25 +1748,21 @@ def generate_health_map(field, stage_key):
                .subtract(tcari_osavi.clamp(0, 5).divide(5).multiply(0.15))
               ).clamp(0, 1).rename('ISI')
 
-        # ── SMOOTHING: Gaussian kernel for professional management-zone look ──
-        # Triple smoothing pass: 50m + 80m + 120m for ultra-smooth zone transitions
-        isi_s1 = isi.focal_mean(radius=50, units='meters', kernelType='gaussian')
-        isi_s2 = isi_s1.focal_mean(radius=80, units='meters', kernelType='gaussian')
-        isi_smooth = isi_s2.focal_mean(radius=120, units='meters', kernelType='gaussian').clip(aoi)
+        # ── SMOOTHING: Single Gaussian for smooth zone look (GEE-friendly) ──
+        isi_smooth = isi.focal_mean(radius=60, units='meters', kernelType='gaussian').clip(aoi)
 
-        # Professional palette: 20 colors for ultra-smooth gradient (matches Pixadvisor zone maps)
+        # Professional palette: smooth gradient red→yellow→green
         palette = [
-            '#67000D', '#8B0000', '#A50F15', '#CB181D', '#DC3545',
-            '#EF4444', '#F97316', '#FB923C', '#FBD38D', '#FDE68A',
-            '#FEF08A', '#D9F99D', '#BBF7D0', '#86EFAC', '#4ADE80',
-            '#22C55E', '#16A34A', '#15803D', '#166534', '#14532D',
+            '#67000D', '#A50F15', '#CB181D', '#EF4444', '#F97316',
+            '#FB923C', '#FDE68A', '#D9F99D', '#86EFAC', '#22C55E',
+            '#16A34A', '#15803D', '#14532D',
         ]
 
-        region = aoi.bounds().buffer(100).getInfo()['coordinates']
+        region = aoi.bounds().buffer(50).getInfo()['coordinates']
 
         thumb_url = isi_smooth.getThumbURL({
             'region': region,
-            'dimensions': '1200x900',
+            'dimensions': '800x600',
             'format': 'png',
             'min': 0.05, 'max': 0.60,
             'palette': palette
