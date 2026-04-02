@@ -251,6 +251,97 @@ class UnifiedHandler(BaseHTTPRequestHandler):
                 'cloudBlocked': result.get('cloudBlocked', False)
             })
             save_db(db)
+
+            # ── AUTO REPORT: Generate PDF + send email if data obtained ──
+            if not result.get('cloudBlocked') and result.get('currentValues'):
+                has_data = any(v is not None for v in result.get('currentValues', {}).values())
+                if has_data:
+                    try:
+                        client = next((c for c in db['clients'] if c['id'] == field.get('clientId')), None)
+                        field_alerts = [a for a in db['alerts'] if a.get('fieldId') == field_id and a.get('status') == 'active']
+                        ts = db.get('timeseries', {}).get(field_id, [])
+                        report = generate_report(field, client, field_alerts, ts)
+                        result['report'] = report
+
+                        # Auto-send email to client if email exists
+                        client_email = client.get('email', '') if client else ''
+                        if client_email and '@' in client_email:
+                            import threading
+                            def send_report_email(email, report_data, field_data, result_data):
+                                try:
+                                    import smtplib
+                                    from email.mime.multipart import MIMEMultipart
+                                    from email.mime.text import MIMEText
+                                    from email.mime.base import MIMEBase
+                                    from email import encoders
+
+                                    smtp_user = os.environ.get('SMTP_USER', '')
+                                    smtp_pass = os.environ.get('SMTP_PASS', '')
+                                    if not smtp_user or not smtp_pass:
+                                        print(f'[Email] SMTP not configured — skipping email to {email}')
+                                        return
+
+                                    vals = result_data.get('currentValues', {})
+                                    health = report_data.get('health', '?')
+                                    stage_desc = result_data.get('stageDesc', '?')
+                                    primary = result_data.get('primaryIndex', 'NDVI')
+
+                                    html = f"""<div style="font-family:Arial;max-width:600px;margin:0 auto;background:#0a1220;color:#F1F5F9;padding:20px;border-radius:12px">
+<h1 style="color:#7FD633;font-size:18px;text-align:center">PIX Monitor — Informe Automatico</h1>
+<p style="color:#94A3B8;font-size:11px;text-align:center">Sentinel-2 | Google Earth Engine | Indices Israel</p>
+<div style="background:#162236;padding:12px;border-radius:8px;margin:10px 0;border-left:4px solid {'#22C55E' if health in ['EXCELENTE','BUENO'] else '#F5A623' if health=='MODERADO' else '#EF4444'}">
+<h2 style="color:{'#22C55E' if health in ['EXCELENTE','BUENO'] else '#F5A623' if health=='MODERADO' else '#EF4444'};font-size:14px;margin:0 0 6px 0">ESTADO: {health}</h2>
+<p style="font-size:12px;margin:2px 0"><b>Lote:</b> {field_data.get('name','')} ({field_data.get('areaHa',0)} ha)</p>
+<p style="font-size:12px;margin:2px 0"><b>Etapa:</b> {stage_desc}</p>
+<p style="font-size:12px;margin:2px 0"><b>Indice primario:</b> {primary}</p>
+<p style="font-size:12px;margin:2px 0"><b>Imagen:</b> {result_data.get('imageDate','?')}</p>
+</div>
+<div style="background:#162236;padding:12px;border-radius:8px;margin:10px 0">
+<h3 style="color:#7FD633;font-size:12px;margin:0 0 6px 0">INDICES</h3>
+<table style="width:100%;font-size:11px;color:#E2E8F0;border-collapse:collapse">"""
+                                    for k in ['TCARI_OSAVI','SIF_proxy','CWSI','SALINITY','NDVI','NDRE','NDMI','PSRI']:
+                                        v = vals.get(k)
+                                        if v is not None:
+                                            html += f'<tr style="background:#0F1B2D"><td style="padding:3px">{k}</td><td style="text-align:center">{v:.4f}</td></tr>'
+                                    html += f"""</table></div>
+<div style="text-align:center;margin:12px 0">
+<a href="{report_data.get('googleMapsLink','#')}" style="background:#7FD633;color:#000;padding:8px 16px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:12px">Navegar al Lote</a>
+</div>
+<p style="color:#64748B;font-size:9px;text-align:center">Pixadvisor — www.pixadvisor.network</p>
+</div>"""
+
+                                    msg = MIMEMultipart()
+                                    msg['From'] = smtp_user
+                                    msg['To'] = email
+                                    msg['Subject'] = f'PIX Monitor — {field_data.get("name","")} — {health}'
+                                    msg.attach(MIMEText(html, 'html'))
+
+                                    # Attach PDF if exists
+                                    pdf_path = report_data.get('pdfPath', '')
+                                    if pdf_path and os.path.exists(pdf_path):
+                                        with open(pdf_path, 'rb') as f:
+                                            part = MIMEBase('application', 'pdf')
+                                            part.set_payload(f.read())
+                                            encoders.encode_base64(part)
+                                            part.add_header('Content-Disposition', f'attachment; filename="{report_data.get("pdf","report.pdf")}"')
+                                            msg.attach(part)
+
+                                    server = smtplib.SMTP('smtp.gmail.com', 587)
+                                    server.starttls()
+                                    server.login(smtp_user, smtp_pass)
+                                    server.send_message(msg)
+                                    server.quit()
+                                    print(f'[Email] Sent to {email}: {field_data.get("name","")} — {health}')
+                                except Exception as e:
+                                    print(f'[Email] Error sending to {email}: {e}')
+
+                            threading.Thread(target=send_report_email, args=(client_email, report, field, result), daemon=True).start()
+                            print(f'[Auto] Report generated + email queued to {client_email}')
+                        else:
+                            print(f'[Auto] Report generated (no client email)')
+                    except Exception as e:
+                        print(f'[Auto] Report error: {e}')
+
             self._json(result)
 
         elif path.endswith('/pause'):
