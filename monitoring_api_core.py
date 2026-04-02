@@ -618,7 +618,7 @@ def compute_monitoring(field):
             .filterDate(search_start, now)
             .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
             .sort('system:time_start', False)
-            .limit(10)
+            .limit(5)
             .map(mask_clouds_scl))
 
         count = candidates.size().getInfo()
@@ -732,7 +732,7 @@ def compute_monitoring(field):
             # FALLBACK: If all values are None (cloud mask removed everything),
             # try the COMPOSITE median of all images WITHOUT cloud mask
             all_none = all(v is None for v in current_values.values())
-            if all_none and is_first_check:
+            if all_none:
                 print(f'[GEE] All values None — trying composite without cloud mask...')
                 search_start = now.advance(-120, 'day')
                 raw_col = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
