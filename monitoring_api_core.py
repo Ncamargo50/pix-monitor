@@ -566,9 +566,25 @@ def compute_monitoring(field):
     indices_needed = stage_cfg['indices']
     print(f'[GEE] Check: {field.get("name")} | {crop} | stage={stage_key} | day={days} | indices={len(indices_needed)}')
 
-    # Build GEE geometry
-    coords = boundary['coordinates'] if boundary['type'] == 'Polygon' else boundary['coordinates'][0]
-    aoi = ee.Geometry.Polygon(coords)
+    # Build GEE geometry — handle Polygon, MultiPolygon, and Feature wrappers
+    geom = boundary
+    if geom.get('type') == 'Feature':
+        geom = geom['geometry']
+    if geom.get('type') == 'MultiPolygon':
+        coords = geom['coordinates'][0]  # first polygon
+    elif geom.get('type') == 'Polygon':
+        coords = geom['coordinates']
+    else:
+        return {"error": f"Unsupported geometry type: {geom.get('type')}"}
+    try:
+        aoi = ee.Geometry.Polygon(coords)
+    except Exception as e:
+        print(f'[GEE] Geometry error: {e}, coords depth: {type(coords)}, len: {len(coords)}')
+        # Try unwrapping one level if over-nested
+        try:
+            aoi = ee.Geometry.Polygon(coords[0] if isinstance(coords[0][0], list) and isinstance(coords[0][0][0], list) else coords)
+        except:
+            return {"error": f"Invalid geometry: {str(e)[:100]}"}
 
     # Date range
     now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
