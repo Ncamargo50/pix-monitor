@@ -152,6 +152,10 @@ class UnifiedHandler(BaseHTTPRequestHandler):
             self._json({'_type': 'pix_users_sync', 'version': data.get('version', 0),
                         'updatedAt': data.get('updatedAt', ''), 'users': data.get('users', [])})
 
+        elif path.startswith('/reports/'):
+            # Serve report files (PDF, KMZ)
+            self._serve_static(path)
+
         elif path.startswith('/api/'):
             self._error('Not found', 404)
 
