@@ -49,259 +49,988 @@ GEE_SERVICE_ACCOUNT_KEY = os.environ.get('GEE_SERVICE_ACCOUNT_KEY', '')  # JSON 
 # ============================================================
 
 CROP_PHENOLOGY = {
-    # ══════════════════════════════════════════════════════════════════
-    # INDICES AVANZADOS 2025+ (Israel/USA research):
-    #   kNDVI: Kernel NDVI anti-saturacion (Camps-Valls 2021, Nature Plants)
-    #   MTCI: MERIS Terrestrial Chlorophyll (Dash & Curran 2004) — lineal, no satura
-    #   S2REP: Red-Edge Position (Frampton 2013) — LAI/clorofila directa
-    #   CCCI: Canopy Chlorophyll Content (Barnes 2000) — proxy N
-    #   IRECI: Inverted Red-Edge Chlorophyll — LAI biofisica
-    #   TCARI/OSAVI: Absorcion clorofila (R2=0.81) — Israel Volcani
-    #   PRI proxy: Actividad fotosintetica tiempo real — estrés pre-visual
-    #
-    # DETECCION DE MALEZAS (10m Sentinel-2):
-    #   Metodo: Anomalia espacial intra-lote en etapas tempranas
-    #   NDVI entresurco > NDVI esperado = vegetacion no-cultivo (maleza)
-    #   PRI_proxy divergente = actividad fotosintetica anomala
-    #   Referencia: Zhang et al. Agronomy 2024, MDPI Drones 2023
-    # ══════════════════════════════════════════════════════════════════
-
     "soja": {
         "name": "Soja",
         "cycle_days": 130,
         "stages": {
-            "VE_V3":  {"days": [0, 25],    "indices": ["MSAVI2","OSAVI","BSI","NDVI","SAVI","SALINITY"],
-                       "weed_indices": ["NDVI","MSAVI2"], "weed_risk": "alto",
-                       "desc": "Emergencia (VE-V3) — Suelo expuesto, maxima ventana de malezas"},
-            "V4_V8":  {"days": [25, 50],   "indices": ["NDVI","NDRE","GNDVI","MTCI","CCCI","PRI_proxy","SIF_proxy","CWSI"],
-                       "weed_indices": ["NDVI","GNDVI","PRI_proxy"], "weed_risk": "medio",
-                       "desc": "Desarrollo vegetativo (V4-V8) — Cierre parcial, malezas entre lineas"},
-            "R1_R2":  {"days": [50, 70],   "indices": ["NDRE","MTCI","kNDVI","EVI","NDMI","S2REP","IRECI","TCARI_OSAVI","SIF_proxy","CWSI"],
-                       "weed_indices": [], "weed_risk": "bajo",
-                       "desc": "Floracion (R1-R2) — Canopy cerrado, etapa critica rendimiento"},
-            "R3_R5":  {"days": [70, 100],  "indices": ["NDRE","kNDVI","S2REP","CCCI","NDMI","IRECI","MTCI","TCARI_OSAVI","CWSI"],
-                       "weed_indices": [], "weed_risk": "bajo",
-                       "desc": "Llenado (R3-R5) — Maxima biomasa, kNDVI+MTCI anti-saturacion"},
-            "R6_R8":  {"days": [100, 130], "indices": ["NDMI","PSRI","NBR2","NDRE","MSI","CWSI"],
-                       "weed_indices": [], "weed_risk": "bajo",
-                       "desc": "Maduracion (R6-R8) — Senescencia, humedad foliar"},
+            "VE_V3": {
+                "days": [
+                    0,
+                    25
+                ],
+                "primary": "MSAVI2",
+                "reason": "R2=0.85 baja cobertura/suelo",
+                "indices": [
+                    "MSAVI2",
+                    "OSAVI",
+                    "BSI",
+                    "NDVI",
+                    "SAVI",
+                    "SALINITY",
+                    "CWSI",
+                    "SIF_proxy",
+                    "TCARI_OSAVI"
+                ],
+                "weed_indices": [
+                    "NDVI",
+                    "MSAVI2"
+                ],
+                "weed_risk": "alto",
+                "desc": "Emergencia (VE-V3) — Suelo expuesto, malezas"
+            },
+            "V4_V8": {
+                "days": [
+                    25,
+                    50
+                ],
+                "primary": "SIF_proxy",
+                "reason": "Fluorescencia fotosintesis R2=0.72 Israel",
+                "indices": [
+                    "NDVI",
+                    "NDRE",
+                    "GNDVI",
+                    "MTCI",
+                    "CCCI",
+                    "PRI_proxy",
+                    "SIF_proxy",
+                    "CWSI",
+                    "TCARI_OSAVI",
+                    "SALINITY"
+                ],
+                "weed_indices": [
+                    "NDVI",
+                    "GNDVI",
+                    "PRI_proxy"
+                ],
+                "weed_risk": "medio",
+                "desc": "Vegetativo (V4-V8)"
+            },
+            "R1_R2": {
+                "days": [
+                    50,
+                    70
+                ],
+                "primary": "TCARI_OSAVI",
+                "reason": "Volcani: clorofila R2=0.81 etapa critica",
+                "indices": [
+                    "NDRE",
+                    "MTCI",
+                    "kNDVI",
+                    "EVI",
+                    "NDMI",
+                    "S2REP",
+                    "IRECI",
+                    "TCARI_OSAVI",
+                    "SIF_proxy",
+                    "CWSI",
+                    "SALINITY"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Floracion (R1-R2) — Etapa critica"
+            },
+            "R3_R5": {
+                "days": [
+                    70,
+                    100
+                ],
+                "primary": "kNDVI",
+                "reason": "Anti-saturacion canopy denso Nature 2021",
+                "indices": [
+                    "NDRE",
+                    "kNDVI",
+                    "S2REP",
+                    "CCCI",
+                    "NDMI",
+                    "IRECI",
+                    "MTCI",
+                    "TCARI_OSAVI",
+                    "CWSI",
+                    "SIF_proxy",
+                    "SALINITY"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Llenado (R3-R5) — Maxima biomasa"
+            },
+            "R6_R8": {
+                "days": [
+                    100,
+                    130
+                ],
+                "primary": "PSRI",
+                "reason": "Mejor detector senescencia y madurez",
+                "indices": [
+                    "NDMI",
+                    "PSRI",
+                    "NBR2",
+                    "NDRE",
+                    "MSI",
+                    "CWSI",
+                    "SALINITY",
+                    "TCARI_OSAVI",
+                    "SIF_proxy"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Maduracion (R6-R8) — Senescencia"
+            }
         },
-        "critical_stages": ["R1_R2", "R3_R5"],
+        "critical_stages": [
+            "R1_R2",
+            "R3_R5"
+        ],
         "weed_detection": {
             "method": "spatial_anomaly",
-            "ndvi_weed_threshold": 0.20,  # NDVI entre surcos > este valor = maleza
-            "critical_window_days": [0, 50],  # VE a V8 = ventana critica
-            "desc": "Malezas detectables por NDVI anomalo en entresurco durante emergencia-desarrollo"
+            "ndvi_weed_threshold": 0.2,
+            "critical_window_days": [
+                0,
+                50
+            ],
+            "desc": "NDVI anomalo entresurco"
         }
     },
     "maiz": {
         "name": "Maiz",
         "cycle_days": 150,
         "stages": {
-            "VE_V6":  {"days": [0, 30],    "indices": ["MSAVI2","OSAVI","BSI","NDVI","SAVI","SALINITY"],
-                       "weed_indices": ["NDVI","MSAVI2","BSI"], "weed_risk": "alto",
-                       "desc": "Emergencia (VE-V6) — Maximo riesgo de malezas, surcos abiertos"},
-            "V8_V12": {"days": [30, 55],   "indices": ["NDVI","NDRE","GNDVI","MTCI","CCCI","PRI_proxy","SIF_proxy","CWSI"],
-                       "weed_indices": ["NDVI","GNDVI","PRI_proxy"], "weed_risk": "medio",
-                       "desc": "Crecimiento rapido (V8-V12) — Malezas competidoras visibles"},
-            "VT_R1":  {"days": [55, 75],   "indices": ["kNDVI","NDRE","MTCI","EVI","S2REP","IRECI","CCCI","TCARI_OSAVI","SIF_proxy","CWSI"],
-                       "weed_indices": [], "weed_risk": "bajo",
-                       "desc": "Floracion (VT-R1) — Canopy cerrado, indices Israel"},
-            "R2_R4":  {"days": [75, 105],  "indices": ["kNDVI","NDRE","S2REP","CCCI","NDMI","MTCI","IRECI","TCARI_OSAVI","CWSI"],
-                       "weed_indices": [], "weed_risk": "bajo",
-                       "desc": "Llenado (R2-R4) — kNDVI fundamental, NDVI saturado"},
-            "R5_R6":  {"days": [105, 150], "indices": ["NDMI","PSRI","NBR2","MSI","NDRE","CWSI"],
-                       "weed_indices": [], "weed_risk": "bajo",
-                       "desc": "Maduracion (R5-R6) — Estrés hidrico + senescencia"},
+            "VE_V6": {
+                "days": [
+                    0,
+                    30
+                ],
+                "primary": "MSAVI2",
+                "reason": "R2=0.85 baja cobertura",
+                "indices": [
+                    "MSAVI2",
+                    "OSAVI",
+                    "BSI",
+                    "NDVI",
+                    "SAVI",
+                    "SALINITY",
+                    "CWSI",
+                    "SIF_proxy",
+                    "TCARI_OSAVI"
+                ],
+                "weed_indices": [
+                    "NDVI",
+                    "MSAVI2",
+                    "BSI"
+                ],
+                "weed_risk": "alto",
+                "desc": "Emergencia (VE-V6)"
+            },
+            "V8_V12": {
+                "days": [
+                    30,
+                    55
+                ],
+                "primary": "NDRE",
+                "reason": "Red-edge N foliar crecimiento",
+                "indices": [
+                    "NDVI",
+                    "NDRE",
+                    "GNDVI",
+                    "MTCI",
+                    "CCCI",
+                    "PRI_proxy",
+                    "SIF_proxy",
+                    "CWSI",
+                    "TCARI_OSAVI",
+                    "SALINITY"
+                ],
+                "weed_indices": [
+                    "NDVI",
+                    "GNDVI",
+                    "PRI_proxy"
+                ],
+                "weed_risk": "medio",
+                "desc": "Crecimiento (V8-V12)"
+            },
+            "VT_R1": {
+                "days": [
+                    55,
+                    75
+                ],
+                "primary": "TCARI_OSAVI",
+                "reason": "Volcani: clorofila R2=0.81",
+                "indices": [
+                    "kNDVI",
+                    "NDRE",
+                    "MTCI",
+                    "EVI",
+                    "S2REP",
+                    "IRECI",
+                    "CCCI",
+                    "TCARI_OSAVI",
+                    "SIF_proxy",
+                    "CWSI",
+                    "SALINITY"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Floracion (VT-R1) — Critica"
+            },
+            "R2_R4": {
+                "days": [
+                    75,
+                    105
+                ],
+                "primary": "kNDVI",
+                "reason": "Anti-saturacion LAI>4",
+                "indices": [
+                    "kNDVI",
+                    "NDRE",
+                    "S2REP",
+                    "CCCI",
+                    "NDMI",
+                    "MTCI",
+                    "IRECI",
+                    "TCARI_OSAVI",
+                    "CWSI",
+                    "SIF_proxy",
+                    "SALINITY"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Llenado (R2-R4)"
+            },
+            "R5_R6": {
+                "days": [
+                    105,
+                    150
+                ],
+                "primary": "NDMI",
+                "reason": "Humedad foliar llenado grano",
+                "indices": [
+                    "NDMI",
+                    "PSRI",
+                    "NBR2",
+                    "MSI",
+                    "NDRE",
+                    "CWSI",
+                    "SALINITY",
+                    "TCARI_OSAVI",
+                    "SIF_proxy"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Maduracion (R5-R6)"
+            }
         },
-        "critical_stages": ["VT_R1", "R2_R4"],
+        "critical_stages": [
+            "VT_R1",
+            "R2_R4"
+        ],
         "weed_detection": {
             "method": "spatial_anomaly",
             "ndvi_weed_threshold": 0.22,
-            "critical_window_days": [0, 55],
-            "desc": "Malezas en entresurco 0.75m, detectables hasta V12"
+            "critical_window_days": [
+                0,
+                55
+            ],
+            "desc": "Malezas entresurco"
         }
     },
     "cana": {
         "name": "Cana de Azucar",
         "cycle_days": 365,
         "stages": {
-            "BROTACION":       {"days": [0, 90],    "indices": ["MSAVI2","OSAVI","BSI","NDVI","SAVI","NDRE","EVI2","NBR2","SALINITY"],
-                                "weed_indices": ["NDVI","BSI","MSAVI2"], "weed_risk": "alto",
-                                "desc": "Brotacion (0-3m) — Surcos abiertos, invasion malezas critica"},
-            "MACOLLAJE":       {"days": [90, 150],  "indices": ["NDRE","NDVI","RECI","CIre","MTCI","CCCI","OSAVI","GNDVI","PRI_proxy","SIF_proxy","CWSI"],
-                                "weed_indices": ["NDVI","GNDVI"], "weed_risk": "medio",
-                                "desc": "Macollaje (3-5m) — Cierre parcial, competencia por N"},
-            "GRAN_CRECIMIENTO":{"days": [150, 240], "indices": ["NDRE","RECI","CIre","IRECI","MTCI","S2REP","kNDVI","EVI","NDMI","TCARI_OSAVI","SIF_proxy","CWSI"],
-                                "weed_indices": [], "weed_risk": "bajo",
-                                "desc": "Gran crecimiento (5-8m) — Canopy denso, sombreo suprime malezas"},
-            "ELONGACION":      {"days": [240, 330], "indices": ["NDRE","RECI","CIre","IRECI","MTCI","S2REP","kNDVI","CCCI","NDMI","MSI","TCARI_OSAVI","CWSI"],
-                                "weed_indices": [], "weed_risk": "bajo",
-                                "desc": "Elongacion (8-11m) — NDVI saturado, red-edge critico"},
-            "MADURACION":      {"days": [330, 365], "indices": ["NDMI","NDRE","RECI","PSRI","MSI","NBR2","S2REP","EVI2","CWSI"],
-                                "weed_indices": [], "weed_risk": "bajo",
-                                "desc": "Maduracion (11-12m) — Humedad, madurez sacarosa"},
+            "BROTACION": {
+                "days": [
+                    0,
+                    90
+                ],
+                "primary": "MSAVI2",
+                "reason": "Suelo + brotes",
+                "indices": [
+                    "MSAVI2",
+                    "OSAVI",
+                    "BSI",
+                    "NDVI",
+                    "SAVI",
+                    "NDRE",
+                    "EVI2",
+                    "NBR2",
+                    "SALINITY",
+                    "CWSI",
+                    "SIF_proxy",
+                    "TCARI_OSAVI"
+                ],
+                "weed_indices": [
+                    "NDVI",
+                    "BSI",
+                    "MSAVI2"
+                ],
+                "weed_risk": "alto",
+                "desc": "Brotacion (0-3m)"
+            },
+            "MACOLLAJE": {
+                "days": [
+                    90,
+                    150
+                ],
+                "primary": "NDRE",
+                "reason": "Red-edge N macollaje",
+                "indices": [
+                    "NDRE",
+                    "NDVI",
+                    "RECI",
+                    "CIre",
+                    "MTCI",
+                    "CCCI",
+                    "GNDVI",
+                    "PRI_proxy",
+                    "SIF_proxy",
+                    "CWSI",
+                    "TCARI_OSAVI",
+                    "SALINITY"
+                ],
+                "weed_indices": [
+                    "NDVI",
+                    "GNDVI"
+                ],
+                "weed_risk": "medio",
+                "desc": "Macollaje (3-5m)"
+            },
+            "GRAN_CRECIMIENTO": {
+                "days": [
+                    150,
+                    240
+                ],
+                "primary": "TCARI_OSAVI",
+                "reason": "Volcani: clorofila canopy R2=0.81",
+                "indices": [
+                    "NDRE",
+                    "RECI",
+                    "CIre",
+                    "IRECI",
+                    "MTCI",
+                    "S2REP",
+                    "kNDVI",
+                    "EVI",
+                    "NDMI",
+                    "TCARI_OSAVI",
+                    "SIF_proxy",
+                    "CWSI",
+                    "SALINITY"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Gran crecimiento (5-8m)"
+            },
+            "ELONGACION": {
+                "days": [
+                    240,
+                    330
+                ],
+                "primary": "kNDVI",
+                "reason": "Anti-saturacion LAI>6",
+                "indices": [
+                    "NDRE",
+                    "RECI",
+                    "CIre",
+                    "IRECI",
+                    "MTCI",
+                    "S2REP",
+                    "kNDVI",
+                    "CCCI",
+                    "NDMI",
+                    "MSI",
+                    "TCARI_OSAVI",
+                    "CWSI",
+                    "SIF_proxy",
+                    "SALINITY"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Elongacion (8-11m)"
+            },
+            "MADURACION": {
+                "days": [
+                    330,
+                    365
+                ],
+                "primary": "NDMI",
+                "reason": "Humedad cosecha",
+                "indices": [
+                    "NDMI",
+                    "NDRE",
+                    "RECI",
+                    "PSRI",
+                    "MSI",
+                    "NBR2",
+                    "S2REP",
+                    "EVI2",
+                    "CWSI",
+                    "SALINITY",
+                    "TCARI_OSAVI",
+                    "SIF_proxy"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Maduracion (11-12m)"
+            }
         },
-        "critical_stages": ["GRAN_CRECIMIENTO", "ELONGACION"],
+        "critical_stages": [
+            "GRAN_CRECIMIENTO",
+            "ELONGACION"
+        ],
         "weed_detection": {
             "method": "spatial_anomaly",
             "ndvi_weed_threshold": 0.25,
-            "critical_window_days": [0, 150],
-            "desc": "Malezas entre surcos 1.4m, critico en brotacion-macollaje"
+            "critical_window_days": [
+                0,
+                150
+            ],
+            "desc": "Malezas surcos 1.4m"
         }
     },
     "trigo": {
         "name": "Trigo",
         "cycle_days": 140,
         "stages": {
-            "EMERGENCIA":  {"days": [0, 20],    "indices": ["MSAVI2","OSAVI","BSI","NDVI","SAVI","SALINITY"],
-                            "weed_indices": ["NDVI","BSI","MSAVI2"], "weed_risk": "alto",
-                            "desc": "Emergencia — Surcos abiertos, malezas de hoja ancha"},
-            "MACOLLAJE":   {"days": [20, 50],   "indices": ["NDVI","NDRE","GNDVI","MTCI","CCCI","PRI_proxy","SIF_proxy","CWSI"],
-                            "weed_indices": ["NDVI","GNDVI","PRI_proxy"], "weed_risk": "medio",
-                            "desc": "Macollaje — Competencia malezas por N y luz"},
-            "ENCANADO":    {"days": [50, 80],   "indices": ["NDRE","kNDVI","EVI","MTCI","S2REP","IRECI","TCARI_OSAVI","SIF_proxy","CWSI"],
-                            "weed_indices": [], "weed_risk": "bajo",
-                            "desc": "Encañazon — Canopy cerrado, indices Israel"},
-            "ESPIGADO":    {"days": [80, 100],  "indices": ["NDRE","kNDVI","S2REP","CCCI","NDMI","IRECI","MTCI","TCARI_OSAVI","CWSI"],
-                            "weed_indices": [], "weed_risk": "bajo",
-                            "desc": "Espigado-floracion — Etapa critica, maxima sensibilidad"},
-            "LLENADO":     {"days": [100, 130], "indices": ["NDMI","PSRI","NDRE","NBR2","MSI","CWSI"],
-                            "weed_indices": [], "weed_risk": "bajo",
-                            "desc": "Llenado — Humedad foliar + senescencia"},
-            "MADURACION":  {"days": [130, 140], "indices": ["NDMI","PSRI","NBR2","MSI","CWSI"],
-                            "weed_indices": [], "weed_risk": "bajo",
-                            "desc": "Maduracion — Cosecha proxima"},
+            "EMERGENCIA": {
+                "days": [
+                    0,
+                    20
+                ],
+                "primary": "MSAVI2",
+                "reason": "Baja cobertura",
+                "indices": [
+                    "MSAVI2",
+                    "OSAVI",
+                    "BSI",
+                    "NDVI",
+                    "SAVI",
+                    "SALINITY",
+                    "CWSI",
+                    "SIF_proxy",
+                    "TCARI_OSAVI"
+                ],
+                "weed_indices": [
+                    "NDVI",
+                    "BSI",
+                    "MSAVI2"
+                ],
+                "weed_risk": "alto",
+                "desc": "Emergencia"
+            },
+            "MACOLLAJE": {
+                "days": [
+                    20,
+                    50
+                ],
+                "primary": "SIF_proxy",
+                "reason": "Fluorescencia diferencia trigo/maleza",
+                "indices": [
+                    "NDVI",
+                    "NDRE",
+                    "GNDVI",
+                    "MTCI",
+                    "CCCI",
+                    "PRI_proxy",
+                    "SIF_proxy",
+                    "CWSI",
+                    "TCARI_OSAVI",
+                    "SALINITY"
+                ],
+                "weed_indices": [
+                    "NDVI",
+                    "GNDVI",
+                    "PRI_proxy"
+                ],
+                "weed_risk": "medio",
+                "desc": "Macollaje"
+            },
+            "ENCANADO": {
+                "days": [
+                    50,
+                    80
+                ],
+                "primary": "NDRE",
+                "reason": "Red-edge N foliar",
+                "indices": [
+                    "NDRE",
+                    "kNDVI",
+                    "EVI",
+                    "MTCI",
+                    "S2REP",
+                    "IRECI",
+                    "TCARI_OSAVI",
+                    "SIF_proxy",
+                    "CWSI",
+                    "SALINITY"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Encanado"
+            },
+            "ESPIGADO": {
+                "days": [
+                    80,
+                    100
+                ],
+                "primary": "TCARI_OSAVI",
+                "reason": "Volcani: maxima sensibilidad R2=0.81",
+                "indices": [
+                    "NDRE",
+                    "kNDVI",
+                    "S2REP",
+                    "CCCI",
+                    "NDMI",
+                    "IRECI",
+                    "MTCI",
+                    "TCARI_OSAVI",
+                    "CWSI",
+                    "SIF_proxy",
+                    "SALINITY"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Espigado — Critica"
+            },
+            "LLENADO": {
+                "days": [
+                    100,
+                    130
+                ],
+                "primary": "NDMI",
+                "reason": "Humedad foliar llenado",
+                "indices": [
+                    "NDMI",
+                    "PSRI",
+                    "NDRE",
+                    "NBR2",
+                    "MSI",
+                    "CWSI",
+                    "SALINITY",
+                    "TCARI_OSAVI",
+                    "SIF_proxy"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Llenado"
+            },
+            "MADURACION": {
+                "days": [
+                    130,
+                    140
+                ],
+                "primary": "PSRI",
+                "reason": "Senescencia + madurez",
+                "indices": [
+                    "NDMI",
+                    "PSRI",
+                    "NBR2",
+                    "MSI",
+                    "CWSI",
+                    "SALINITY",
+                    "TCARI_OSAVI",
+                    "SIF_proxy"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Maduracion"
+            }
         },
-        "critical_stages": ["ESPIGADO", "LLENADO"],
+        "critical_stages": [
+            "ESPIGADO",
+            "LLENADO"
+        ],
         "weed_detection": {
             "method": "spatial_anomaly",
             "ndvi_weed_threshold": 0.18,
-            "critical_window_days": [0, 50],
-            "desc": "Malezas de hoja ancha entre surcos, critico emergencia-macollaje"
+            "critical_window_days": [
+                0,
+                50
+            ],
+            "desc": "Malezas hoja ancha"
         }
     },
     "arroz": {
         "name": "Arroz",
         "cycle_days": 140,
         "stages": {
-            "EMERGENCIA":  {"days": [0, 25],    "indices": ["MSAVI2","OSAVI","NDVI","SAVI","SALINITY"],
-                            "weed_indices": ["NDVI","MSAVI2"], "weed_risk": "alto",
-                            "desc": "Emergencia — Malezas acuaticas competidoras"},
-            "MACOLLAJE":   {"days": [25, 55],   "indices": ["NDVI","NDRE","EVI","GNDVI","MTCI","PRI_proxy","SIF_proxy","CWSI"],
-                            "weed_indices": ["NDVI","EVI"], "weed_risk": "medio",
-                            "desc": "Macollaje — Arroz rojo y capim arroz"},
-            "PANICULACION":{"days": [55, 80],   "indices": ["NDRE","kNDVI","MTCI","EVI","NDMI","S2REP","TCARI_OSAVI","SIF_proxy","CWSI"],
-                            "weed_indices": [], "weed_risk": "bajo",
-                            "desc": "Paniculacion — Canopy denso"},
-            "FLORACION":   {"days": [80, 100],  "indices": ["NDRE","kNDVI","S2REP","CCCI","NDMI","IRECI","TCARI_OSAVI","CWSI"],
-                            "weed_indices": [], "weed_risk": "bajo",
-                            "desc": "Floracion — Etapa critica rendimiento"},
-            "LLENADO":     {"days": [100, 140], "indices": ["NDMI","PSRI","NDRE","NBR2","MSI","CWSI"],
-                            "weed_indices": [], "weed_risk": "bajo",
-                            "desc": "Llenado-maduracion — Senescencia"},
+            "EMERGENCIA": {
+                "days": [
+                    0,
+                    25
+                ],
+                "primary": "MSAVI2",
+                "reason": "Baja veg lamina agua",
+                "indices": [
+                    "MSAVI2",
+                    "OSAVI",
+                    "NDVI",
+                    "SAVI",
+                    "SALINITY",
+                    "CWSI",
+                    "SIF_proxy",
+                    "TCARI_OSAVI"
+                ],
+                "weed_indices": [
+                    "NDVI",
+                    "MSAVI2"
+                ],
+                "weed_risk": "alto",
+                "desc": "Emergencia"
+            },
+            "MACOLLAJE": {
+                "days": [
+                    25,
+                    55
+                ],
+                "primary": "NDRE",
+                "reason": "Red-edge N macollaje",
+                "indices": [
+                    "NDVI",
+                    "NDRE",
+                    "EVI",
+                    "GNDVI",
+                    "MTCI",
+                    "PRI_proxy",
+                    "SIF_proxy",
+                    "CWSI",
+                    "TCARI_OSAVI",
+                    "SALINITY"
+                ],
+                "weed_indices": [
+                    "NDVI",
+                    "EVI"
+                ],
+                "weed_risk": "medio",
+                "desc": "Macollaje"
+            },
+            "PANICULACION": {
+                "days": [
+                    55,
+                    80
+                ],
+                "primary": "TCARI_OSAVI",
+                "reason": "Volcani: clorofila R2=0.81",
+                "indices": [
+                    "NDRE",
+                    "kNDVI",
+                    "MTCI",
+                    "EVI",
+                    "NDMI",
+                    "S2REP",
+                    "TCARI_OSAVI",
+                    "SIF_proxy",
+                    "CWSI",
+                    "SALINITY"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Paniculacion"
+            },
+            "FLORACION": {
+                "days": [
+                    80,
+                    100
+                ],
+                "primary": "kNDVI",
+                "reason": "Anti-saturacion LAI alto",
+                "indices": [
+                    "NDRE",
+                    "kNDVI",
+                    "S2REP",
+                    "CCCI",
+                    "NDMI",
+                    "IRECI",
+                    "TCARI_OSAVI",
+                    "CWSI",
+                    "SIF_proxy",
+                    "SALINITY"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Floracion — Critica"
+            },
+            "LLENADO": {
+                "days": [
+                    100,
+                    140
+                ],
+                "primary": "NDMI",
+                "reason": "Humedad llenado grano",
+                "indices": [
+                    "NDMI",
+                    "PSRI",
+                    "NDRE",
+                    "NBR2",
+                    "MSI",
+                    "CWSI",
+                    "SALINITY",
+                    "TCARI_OSAVI",
+                    "SIF_proxy"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Llenado"
+            }
         },
-        "critical_stages": ["FLORACION", "LLENADO"],
+        "critical_stages": [
+            "FLORACION",
+            "LLENADO"
+        ],
         "weed_detection": {
             "method": "spatial_anomaly",
-            "ndvi_weed_threshold": 0.20,
-            "critical_window_days": [0, 55],
-            "desc": "Arroz rojo, capim arroz, tiririca en emergencia-macollaje"
+            "ndvi_weed_threshold": 0.2,
+            "critical_window_days": [
+                0,
+                55
+            ],
+            "desc": "Arroz rojo, capim"
         }
     },
     "girasol": {
         "name": "Girasol",
         "cycle_days": 120,
         "stages": {
-            "EMERGENCIA": {"days": [0, 20],   "indices": ["MSAVI2","OSAVI","BSI","NDVI","SAVI","SALINITY"],
-                           "weed_indices": ["NDVI","BSI","MSAVI2"], "weed_risk": "alto",
-                           "desc": "Emergencia — Surcos abiertos, malezas rapidas"},
-            "VEGETATIVO": {"days": [20, 50],  "indices": ["NDVI","NDRE","GNDVI","EVI","MTCI","PRI_proxy","SIF_proxy","CWSI"],
-                           "weed_indices": ["NDVI","GNDVI"], "weed_risk": "medio",
-                           "desc": "Vegetativo — Competencia por luz y nutrientes"},
-            "FLORACION":  {"days": [50, 75],  "indices": ["NDRE","kNDVI","EVI2","NDMI","OSAVI","S2REP","IRECI","TCARI_OSAVI","SIF_proxy","CWSI"],
-                           "weed_indices": [], "weed_risk": "bajo",
-                           "desc": "Floracion (R1-R4) — Canopy cerrado"},
-            "LLENADO":    {"days": [75, 100], "indices": ["NDRE","NDMI","NBR2","PSRI","MSI","CWSI"],
-                           "weed_indices": [], "weed_risk": "bajo",
-                           "desc": "Llenado — Estrés hidrico + madurez"},
-            "MADURACION": {"days": [100, 120],"indices": ["NDMI","PSRI","NBR2","MSI","CWSI"],
-                           "weed_indices": [], "weed_risk": "bajo",
-                           "desc": "Maduracion — Pre-cosecha"},
+            "EMERGENCIA": {
+                "days": [
+                    0,
+                    20
+                ],
+                "primary": "MSAVI2",
+                "reason": "Surcos abiertos",
+                "indices": [
+                    "MSAVI2",
+                    "OSAVI",
+                    "BSI",
+                    "NDVI",
+                    "SAVI",
+                    "SALINITY",
+                    "CWSI",
+                    "SIF_proxy",
+                    "TCARI_OSAVI"
+                ],
+                "weed_indices": [
+                    "NDVI",
+                    "BSI",
+                    "MSAVI2"
+                ],
+                "weed_risk": "alto",
+                "desc": "Emergencia"
+            },
+            "VEGETATIVO": {
+                "days": [
+                    20,
+                    50
+                ],
+                "primary": "SIF_proxy",
+                "reason": "Fluorescencia R2=0.72",
+                "indices": [
+                    "NDVI",
+                    "NDRE",
+                    "GNDVI",
+                    "EVI",
+                    "MTCI",
+                    "PRI_proxy",
+                    "SIF_proxy",
+                    "CWSI",
+                    "TCARI_OSAVI",
+                    "SALINITY"
+                ],
+                "weed_indices": [
+                    "NDVI",
+                    "GNDVI"
+                ],
+                "weed_risk": "medio",
+                "desc": "Vegetativo"
+            },
+            "FLORACION": {
+                "days": [
+                    50,
+                    75
+                ],
+                "primary": "TCARI_OSAVI",
+                "reason": "Volcani: clorofila R2=0.81",
+                "indices": [
+                    "NDRE",
+                    "kNDVI",
+                    "EVI2",
+                    "NDMI",
+                    "OSAVI",
+                    "S2REP",
+                    "IRECI",
+                    "TCARI_OSAVI",
+                    "SIF_proxy",
+                    "CWSI",
+                    "SALINITY"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Floracion"
+            },
+            "LLENADO": {
+                "days": [
+                    75,
+                    100
+                ],
+                "primary": "CWSI",
+                "reason": "Stress hidrico aquenios Israel",
+                "indices": [
+                    "NDRE",
+                    "NDMI",
+                    "NBR2",
+                    "PSRI",
+                    "MSI",
+                    "CWSI",
+                    "SALINITY",
+                    "TCARI_OSAVI",
+                    "SIF_proxy"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Llenado"
+            },
+            "MADURACION": {
+                "days": [
+                    100,
+                    120
+                ],
+                "primary": "PSRI",
+                "reason": "Senescencia capitulo",
+                "indices": [
+                    "NDMI",
+                    "PSRI",
+                    "NBR2",
+                    "MSI",
+                    "CWSI",
+                    "SALINITY",
+                    "TCARI_OSAVI",
+                    "SIF_proxy"
+                ],
+                "weed_indices": [],
+                "weed_risk": "bajo",
+                "desc": "Maduracion"
+            }
         },
-        "critical_stages": ["FLORACION", "LLENADO"],
+        "critical_stages": [
+            "FLORACION",
+            "LLENADO"
+        ],
         "weed_detection": {
             "method": "spatial_anomaly",
-            "ndvi_weed_threshold": 0.20,
-            "critical_window_days": [0, 50],
-            "desc": "Malezas entre surcos 0.45-0.70m"
+            "ndvi_weed_threshold": 0.2,
+            "critical_window_days": [
+                0,
+                50
+            ],
+            "desc": "Malezas surcos"
         }
     },
     "pastura": {
         "name": "Pastura (Brachiaria/Panicum)",
-        "cycle_days": 365,  # Perenne — monitoreo continuo todo el año
+        "cycle_days": 365,
         "is_perennial": True,
         "stages": {
-            # Pasturas tropicales (Brachiaria brizantha, Panicum maximum, etc.)
-            # No tienen fenologia fija — se monitorea por estado de la biomasa
-            "REBROTE":         {"days": [0, 30],    "indices": ["MSAVI2","NDVI","SAVI","OSAVI","CWSI"],                       "desc": "Rebrote post-pastoreo (0-30 dias)"},
-            "CRECIMIENTO":     {"days": [30, 60],   "indices": ["NDVI","NDRE","GNDVI","EVI","MTCI","SIF_proxy","CWSI"],  "desc": "Crecimiento activo (30-60 dias)"},
-            "OPTIMO_PASTOREO": {"days": [60, 90],   "indices": ["NDVI","NDRE","EVI","NDMI","GNDVI","CWSI"],              "desc": "Punto optimo de pastoreo (60-90 dias)"},
-            "MADURO":          {"days": [90, 120],  "indices": ["NDVI","NDMI","PSRI","NBR2","CWSI"],                     "desc": "Pastura madura (>90 dias, calidad baja)"},
-            "SOBREMADURO":     {"days": [120, 365], "indices": ["PSRI","NDMI","NBR2","MSI","CWSI"],                      "desc": "Pastura sobremadura (lignificada)"},
+            "REBROTE": {
+                "days": [
+                    0,
+                    30
+                ],
+                "primary": "MSAVI2",
+                "reason": "Post-pastoreo suelo expuesto",
+                "indices": [
+                    "MSAVI2",
+                    "NDVI",
+                    "SAVI",
+                    "OSAVI",
+                    "CWSI",
+                    "SIF_proxy",
+                    "TCARI_OSAVI",
+                    "SALINITY"
+                ],
+                "desc": "Rebrote (0-30d)"
+            },
+            "CRECIMIENTO": {
+                "days": [
+                    30,
+                    60
+                ],
+                "primary": "SIF_proxy",
+                "reason": "Fluorescencia rebrote activo",
+                "indices": [
+                    "NDVI",
+                    "NDRE",
+                    "GNDVI",
+                    "EVI",
+                    "MTCI",
+                    "SIF_proxy",
+                    "CWSI",
+                    "TCARI_OSAVI",
+                    "SALINITY"
+                ],
+                "desc": "Crecimiento (30-60d)"
+            },
+            "OPTIMO_PASTOREO": {
+                "days": [
+                    60,
+                    90
+                ],
+                "primary": "NDVI",
+                "reason": "Calibrado biomasa R2=0.74 EMBRAPA",
+                "indices": [
+                    "NDVI",
+                    "NDRE",
+                    "EVI",
+                    "NDMI",
+                    "GNDVI",
+                    "CWSI",
+                    "SIF_proxy",
+                    "TCARI_OSAVI",
+                    "SALINITY"
+                ],
+                "desc": "Optimo pastoreo (60-90d)"
+            },
+            "MADURO": {
+                "days": [
+                    90,
+                    120
+                ],
+                "primary": "PSRI",
+                "reason": "Detecta lignificacion",
+                "indices": [
+                    "NDVI",
+                    "NDMI",
+                    "PSRI",
+                    "NBR2",
+                    "CWSI",
+                    "SIF_proxy",
+                    "TCARI_OSAVI",
+                    "SALINITY"
+                ],
+                "desc": "Madura (>90d)"
+            },
+            "SOBREMADURO": {
+                "days": [
+                    120,
+                    365
+                ],
+                "primary": "PSRI",
+                "reason": "Lignificada PSRI max",
+                "indices": [
+                    "PSRI",
+                    "NDMI",
+                    "NBR2",
+                    "MSI",
+                    "CWSI",
+                    "SIF_proxy",
+                    "TCARI_OSAVI",
+                    "SALINITY"
+                ],
+                "desc": "Sobremadura"
+            }
         },
-        "critical_stages": ["CRECIMIENTO", "OPTIMO_PASTOREO"],
-        # ── MODELO DE BIOMASA (kg MS/ha) ──
-        # Basado en: Nature Sci Reports 2024, EMBRAPA Pecuaria, Grassland Biomass S2 ML (Springer 2024)
-        # Regresion NDVI → Biomasa para Brachiaria tropical:
-        #   Biomasa (kg MS/ha) = 6842 * NDVI - 988   (R² = 0.74, RMSE = 487 kg/ha)
-        #   Fuente: OSAVI best predictor R²=0.77, SAVI R²=0.52 (Springer s10661-024-13610-1)
-        #   Fuente: Sentinel-2 + ML para Urochloa brizantha (Nature s41598-024-59160-x)
-        "biomass_model": {
-            "type": "linear_regression",
-            "formula": "biomass_kgDM_ha = 6842 * NDVI - 988",
-            "coefficients": {"slope": 6842, "intercept": -988},
-            "r2": 0.74,
-            "rmse_kg": 487,
-            "valid_range": {"NDVI_min": 0.15, "NDVI_max": 0.85},
-            "species": "Urochloa brizantha (Marandu), Panicum maximum",
-            "source": "Nature Sci Reports 2024 + Springer Environmental Monitoring 2024"
-        },
-        # ── MODELO DE TASA DE CRECIMIENTO (kg MS/ha/dia) ──
-        # Growth Rate = (Biomasa_actual - Biomasa_anterior) / dias_entre_mediciones
-        # Referencia: EMBRAPA — Brachiaria tropical produce 40-120 kg MS/ha/dia en verano
-        "growth_rate": {
-            "excellent": {"min": 80, "desc": "Crecimiento excelente (>80 kg MS/ha/dia)"},
-            "good":      {"min": 50, "max": 80, "desc": "Crecimiento bueno (50-80)"},
-            "moderate":  {"min": 30, "max": 50, "desc": "Crecimiento moderado (30-50)"},
-            "low":       {"min": 10, "max": 30, "desc": "Crecimiento bajo (10-30) — sequia/frio"},
-            "dormant":   {"max": 10, "desc": "Dormancia (<10) — sin crecimiento"}
-        },
-        # ── CARGA ANIMAL ──
-        # Capacidad de carga = (Biomasa disponible * Eficiencia de pastoreo) / (Consumo diario * Dias de ocupacion)
-        # Consumo: bovino adulto (~450kg PV) consume ~2.5% PV/dia = 11.25 kg MS/dia
-        # Eficiencia de pastoreo: 50-60% (pastoreo rotacional), 30-40% (continuo)
-        # Fuente: EMBRAPA Gado de Corte, Manual de Pastagens Tropicais
-        "stocking_rate": {
-            "animal_weight_kg": 450,
-            "daily_intake_pct": 2.5,   # % del peso vivo
-            "daily_intake_kg": 11.25,  # kg MS/dia (450 * 0.025)
-            "grazing_efficiency_rotational": 0.55,  # 55% aprovechamiento rotacional
-            "grazing_efficiency_continuous": 0.35,   # 35% aprovechamiento continuo
-            "min_residual_kg": 1500,   # Biomasa residual minima para recuperacion (kg MS/ha)
-            "formula": "UA_ha = (biomasa_disponible - residual_min) * eficiencia / (consumo_diario * dias_ocupacion)",
-            "source": "EMBRAPA Gado de Corte — Sistemas de Produccion, Manual Pastagens Tropicais"
-        },
-        # Umbrales de manejo
-        "management_thresholds": {
-            "entry_height_cm": {"Brachiaria_brizantha": 30, "Panicum_maximum": 70, "Brachiaria_decumbens": 25},
-            "exit_height_cm":  {"Brachiaria_brizantha": 15, "Panicum_maximum": 35, "Brachiaria_decumbens": 10},
-            "entry_biomass_kg": 3500,  # Biomasa ideal de entrada al pastoreo
-            "exit_biomass_kg":  1500,  # Biomasa residual post-pastoreo
-            "ndvi_entry": 0.65,        # NDVI correspondiente a biomasa de entrada
-            "ndvi_exit": 0.40,         # NDVI correspondiente a biomasa residual
-        }
-    },
+        "critical_stages": [
+            "CRECIMIENTO",
+            "OPTIMO_PASTOREO"
+        ]
+    }
 }
 
 # ============================================================
@@ -779,7 +1508,9 @@ def compute_monitoring(field):
 
     # ── STEP 3: Baseline (2-year historical) — NO compute_indices on collection ──
     # OPTIMIZATION: Only compute primary_idx on baseline, not all 24 indices
-    primary_idx = indices_needed[0] if indices_needed else 'NDVI'
+    # Auto-select primary index from phenological stage config
+    primary_idx = stage_cfg.get('primary', indices_needed[0] if indices_needed else 'NDVI')
+    primary_reason = stage_cfg.get('reason', '')
     baseline_mean_val = None
     baseline_std_val = None
     z_score = None
@@ -923,6 +1654,8 @@ def compute_monitoring(field):
         "checkedAt": now_iso(),
         "imageDate": image_date,
         "searchDaysUsed": search_days_used,
+        "primaryIndex": primary_idx,
+        "primaryReason": primary_reason,
         "elapsedSeconds": elapsed
     }
 
