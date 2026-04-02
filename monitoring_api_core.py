@@ -1687,8 +1687,8 @@ REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reports'
 
 
 def generate_health_map(field, stage_key):
-    """Generate ISI (Integrated Health Index) map as PNG from GEE.
-    Combines multiple indices weighted by phenological stage relevance.
+    """Generate professional ISI (Integrated Health Index) map as PNG from GEE.
+    Smooth zones like precision agriculture management zone maps.
     Returns: path to saved PNG file, or None if failed.
     """
     if not init_gee():
@@ -1705,7 +1705,7 @@ def generate_health_map(field, stage_key):
         aoi = ee.Geometry({"type": "Polygon", "coordinates": [ring_2d]}, proj='EPSG:4326', evenOdd=False)
 
         now = ee.Date(datetime.now(timezone.utc).strftime('%Y-%m-%d'))
-        search_start = now.advance(-60, 'day')
+        search_start = now.advance(-90, 'day')
 
         def mask_clouds(img):
             scl = img.select('SCL')
@@ -1714,12 +1714,14 @@ def generate_health_map(field, stage_key):
         col = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
             .filterBounds(aoi).filterDate(search_start, now)
             .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 40))
-            .sort('system:time_start', False).limit(5).map(mask_clouds))
+            .sort('system:time_start', False).limit(8).map(mask_clouds))
 
-        if col.size().getInfo() == 0:
+        count = col.size().getInfo()
+        if count == 0:
             return None
 
-        img = col.first()
+        # Use MEDIAN composite for smoother result (reduces noise)
+        img = col.median()
         b3 = img.select('B3').divide(10000)
         b4 = img.select('B4').divide(10000)
         b5 = img.select('B5').divide(10000)
@@ -1737,9 +1739,7 @@ def generate_health_map(field, stage_key):
         cwsi = b11.subtract(b8a).divide(b11.add(b8a).max(ee.Image(0.001)))
         sif = b5.subtract(b4).divide(b4.max(ee.Image(0.001)))
 
-        # ISI = weighted combination normalized 0-1
-        # Positive: NDVI, NDRE, SIF (higher=healthier)
-        # Negative: CWSI, TCARI_OSAVI (higher=more stress)
+        # ISI = weighted fusion of all indices
         isi = (ndvi.multiply(0.25)
                .add(ndre.multiply(0.20))
                .add(sif.clamp(0, 2).divide(2).multiply(0.15))
@@ -1748,18 +1748,31 @@ def generate_health_map(field, stage_key):
                .subtract(tcari_osavi.clamp(0, 5).divide(5).multiply(0.15))
               ).clamp(0, 1).rename('ISI')
 
-        # Color palette: red -> yellow -> green
-        vis = {'min': 0.1, 'max': 0.7, 'palette': ['#991B1B','#EF4444','#F5A623','#FCD34D','#7FD633','#22C55E','#15803D']}
+        # ── SMOOTHING: Gaussian kernel for professional management-zone look ──
+        # Triple smoothing pass: 50m + 80m + 120m for ultra-smooth zone transitions
+        isi_s1 = isi.focal_mean(radius=50, units='meters', kernelType='gaussian')
+        isi_s2 = isi_s1.focal_mean(radius=80, units='meters', kernelType='gaussian')
+        isi_smooth = isi_s2.focal_mean(radius=120, units='meters', kernelType='gaussian').clip(aoi)
 
-        thumb_url = isi.clip(aoi).getThumbURL({
-            'region': aoi.bounds().getInfo()['coordinates'],
-            'dimensions': '400x400',
+        # Professional palette: 20 colors for ultra-smooth gradient (matches Pixadvisor zone maps)
+        palette = [
+            '#67000D', '#8B0000', '#A50F15', '#CB181D', '#DC3545',
+            '#EF4444', '#F97316', '#FB923C', '#FBD38D', '#FDE68A',
+            '#FEF08A', '#D9F99D', '#BBF7D0', '#86EFAC', '#4ADE80',
+            '#22C55E', '#16A34A', '#15803D', '#166534', '#14532D',
+        ]
+
+        region = aoi.bounds().buffer(100).getInfo()['coordinates']
+
+        thumb_url = isi_smooth.getThumbURL({
+            'region': region,
+            'dimensions': '1200x900',
             'format': 'png',
-            'min': vis['min'], 'max': vis['max'],
-            'palette': vis['palette']
+            'min': 0.05, 'max': 0.60,
+            'palette': palette
         })
 
-        # Download thumbnail
+        # Download
         import urllib.request
         os.makedirs(REPORTS_DIR, exist_ok=True)
         map_filename = f'ISI_map_{field.get("name","lote")}_{datetime.now().strftime("%Y%m%d")}.png'.replace(' ', '_')
