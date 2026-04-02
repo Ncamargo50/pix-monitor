@@ -1687,8 +1687,8 @@ REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reports'
 
 
 def generate_health_map(field, stage_key):
-    """Generate professional ISI health map with matplotlib — Pixadvisor style.
-    Smooth zones, perimeter, colorbar, axes, title — like management zone maps.
+    """Generate ISI health map as colored PNG directly from GEE.
+    No matplotlib — uses GEE's built-in visualization for low memory usage.
     Returns: path to saved PNG file, or None if failed.
     """
     if not init_gee():
@@ -1716,15 +1716,13 @@ def generate_health_map(field, stage_key):
             .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 40))
             .sort('system:time_start', False).limit(8).map(mask_clouds))
 
-        count = col.size().getInfo()
-        if count == 0:
+        if col.size().getInfo() == 0:
             return None
 
         img = col.median()
         b3 = img.select('B3').divide(10000)
         b4 = img.select('B4').divide(10000)
         b5 = img.select('B5').divide(10000)
-        b6 = img.select('B6').divide(10000)
         b8 = img.select('B8').divide(10000)
         b8a = img.select('B8A').divide(10000)
         b11 = img.select('B11').divide(10000)
@@ -1738,18 +1736,19 @@ def generate_health_map(field, stage_key):
         cwsi = b11.subtract(b8a).divide(b11.add(b8a).max(ee.Image(0.001)))
         sif = b5.subtract(b4).divide(b4.max(ee.Image(0.001)))
 
-        isi = (ndvi.multiply(0.25)
-               .add(ndre.multiply(0.20))
+        # ISI = weighted fusion
+        isi = (ndvi.multiply(0.25).add(ndre.multiply(0.20))
                .add(sif.clamp(0, 2).divide(2).multiply(0.15))
                .add(ndmi.add(0.5).multiply(0.15))
                .subtract(cwsi.clamp(-0.5, 0.5).add(0.5).multiply(0.10))
                .subtract(tcari_osavi.clamp(0, 5).divide(5).multiply(0.15))
               ).clamp(0, 1).rename('ISI')
 
+        # Gaussian smoothing for zone-like appearance
         isi_smooth = isi.focal_mean(radius=60, units='meters', kernelType='gaussian').clip(aoi)
 
-        # Download COLORED image from GEE
-        colors_palette = [
+        # Professional 15-color palette (red→yellow→green)
+        palette = [
             '67000D', 'A50F15', 'CB181D', 'EF4444', 'F97316',
             'FB923C', 'FBBF24', 'FDE68A', 'D9F99D', '86EFAC',
             '4ADE80', '22C55E', '16A34A', '15803D', '14532D']
@@ -1757,108 +1756,18 @@ def generate_health_map(field, stage_key):
         region = aoi.bounds().buffer(50).getInfo()['coordinates']
         thumb_url = isi_smooth.getThumbURL({
             'region': region,
-            'dimensions': '500x500',
+            'dimensions': '800x600',
             'format': 'png',
             'min': 0.05, 'max': 0.60,
-            'palette': colors_palette
+            'palette': palette
         })
 
-        import urllib.request
-        import numpy as np
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        from matplotlib.colors import LinearSegmentedColormap
-        from matplotlib.patches import Polygon as MplPolygon
-        from PIL import Image as PILImage
-
-        # Download colored thumbnail
-        tmp_color = os.path.join(REPORTS_DIR, '_tmp_color.png')
-        os.makedirs(REPORTS_DIR, exist_ok=True)
-        urllib.request.urlretrieve(thumb_url, tmp_color)
-
-        # Load colored image
-        pil_img = PILImage.open(tmp_color).convert('RGBA')
-        img_array = np.array(pil_img)
-
-        # Coordinate extents
-        lngs = [c[0] for c in ring_2d]
-        lats = [c[1] for c in ring_2d]
-        extent = [min(lngs) - 0.001, max(lngs) + 0.001, max(lats) + 0.001, min(lats) - 0.001]
-
-        # ── MATPLOTLIB: Professional Pixadvisor-style map ──
-        fig, ax = plt.subplots(1, 1, figsize=(10, 8), facecolor='#F5F5F5')
-        ax.set_facecolor('#E8E8E8')
-
-        # Plot colored satellite image
-        im = ax.imshow(img_array, extent=extent, aspect='equal', interpolation='bilinear')
-
-        # Create a ScalarMappable for colorbar
-        colors_hex = ['#' + c for c in colors_palette]
-        cmap = LinearSegmentedColormap.from_list('pix', colors_hex, N=256)
-        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0.05, vmax=0.60))
-
-        # Draw perimeter
-        poly_coords = [(c[0], c[1]) for c in ring_2d]
-        polygon = MplPolygon(poly_coords, fill=False, edgecolor='black', linewidth=2.0, linestyle='-')
-        ax.add_patch(polygon)
-
-        # Title
-        field_name = field.get('name', 'Lote')
-        crop = field.get('crop', 'soja')
-        area = field.get('areaHa', 0)
-        crop_cfg = CROP_PHENOLOGY.get(crop, {})
-        stage_desc = ''
-        if stage_key:
-            for sk, sv in crop_cfg.get('stages', {}).items():
-                if sk == stage_key:
-                    stage_desc = sv.get('desc', stage_key)
-                    break
-
-        ax.set_title(f'PIXADVISOR — Indice de Salud Integrado (ISI)\\n'
-                     f'{field_name} | {area} ha | {crop_cfg.get("name", crop)} | {stage_desc}',
-                     fontsize=11, fontweight='bold', color='#1a1a1a', pad=12)
-
-        # Axes
-        ax.set_xlabel('Longitud', fontsize=9, color='#444444')
-        ax.set_ylabel('Latitud', fontsize=9, color='#444444')
-        ax.tick_params(axis='both', labelsize=8, colors='#666666')
-        ax.grid(True, alpha=0.3, linestyle='--', color='#999999')
-
-        # Colorbar
-        cbar = plt.colorbar(sm, ax=ax, shrink=0.75, pad=0.02, aspect=30)
-        cbar.set_label('Indice de Salud Integrado (ISI)', fontsize=9, color='#333333')
-        cbar.ax.tick_params(labelsize=8)
-        # Add zone labels
-        cbar.ax.text(1.5, 0.1, 'Critico', transform=cbar.ax.transAxes, fontsize=7, color='#A50F15', va='center')
-        cbar.ax.text(1.5, 0.3, 'Atencion', transform=cbar.ax.transAxes, fontsize=7, color='#F97316', va='center')
-        cbar.ax.text(1.5, 0.5, 'Moderado', transform=cbar.ax.transAxes, fontsize=7, color='#FBBF24', va='center')
-        cbar.ax.text(1.5, 0.7, 'Bueno', transform=cbar.ax.transAxes, fontsize=7, color='#22C55E', va='center')
-        cbar.ax.text(1.5, 0.9, 'Excelente', transform=cbar.ax.transAxes, fontsize=7, color='#15803D', va='center')
-
-        # Footer
-        fig.text(0.5, 0.01, f'Pixadvisor — Agricultura de Precision | {datetime.now().strftime("%d/%m/%Y")} | Sentinel-2 + ISI (NDVI+NDRE+SIF+CWSI+TCARI/OSAVI)',
-                 ha='center', fontsize=7, color='#888888')
-
-        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
-
-        os.makedirs(REPORTS_DIR, exist_ok=True)
-        map_filename = f'ISI_map_{field_name}_{datetime.now().strftime("%Y%m%d")}.png'.replace(' ', '_')
-        map_path = os.path.join(REPORTS_DIR, map_filename)
-        fig.savefig(map_path, dpi=200, bbox_inches='tight', facecolor=fig.get_facecolor())
-        plt.close(fig)
-
-        # Cleanup temp
-        if os.path.exists(tmp_color):
-            os.remove(tmp_color)
-
-        # Download
         import urllib.request
         os.makedirs(REPORTS_DIR, exist_ok=True)
         map_filename = f'ISI_map_{field.get("name","lote")}_{datetime.now().strftime("%Y%m%d")}.png'.replace(' ', '_')
         map_path = os.path.join(REPORTS_DIR, map_filename)
         urllib.request.urlretrieve(thumb_url, map_path)
-        print(f'[Map] ISI health map saved: {map_path} ({os.path.getsize(map_path)} bytes)')
+        print(f'[Map] ISI map saved: {map_path} ({os.path.getsize(map_path)} bytes)')
         return map_path
 
     except Exception as e:
