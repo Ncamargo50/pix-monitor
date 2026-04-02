@@ -1928,8 +1928,9 @@ def generate_report(field, client, alerts, timeseries):
         story.append(Paragraph('1. Mapa de Salud del Cultivo (ISI)', styles['H2']))
         story.append(Paragraph('Indice de Salud Integrado: fusion TCARI/OSAVI + CWSI + SIF + NDVI + NDRE + NDMI', styles['Body']))
 
-        # Generate ISI map from GEE
-        isi_map_path = generate_health_map(field, stage)
+        # Generate ISI map — skip GEE map on Free tier (causes timeout)
+        # Enable when on Starter plan ($7/mo) with more RAM/timeout
+        isi_map_path = None  # generate_health_map(field, stage)
         if isi_map_path and os.path.exists(isi_map_path):
             story.append(Image(isi_map_path, width=170*mm, height=100*mm))
             story.append(Paragraph(
